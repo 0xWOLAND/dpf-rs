@@ -4,8 +4,8 @@
 #include <string>
 #include <vector>
 
-#include "google/protobuf/arena.h"
-#include "pir/dense_dpf_pir_server.h"
+#include "external/google_dpf/pir/dense_dpf_pir_server.h"
+#include "external/google_dpf/pir/private_information_retrieval.pb.h"
 
 // Add these macro definitions
 #define DPF_RETURN_IF_ERROR(expr) \
@@ -46,19 +46,11 @@ typedef enum {
     DPF_PIR_SERVER_HELPER = 1
 } DpfPirServerRole;
 
-// Callback function types
-typedef DpfPirStatus (*DpfPirForwardRequestFn)(const DpfPirBuffer* request, void* user_data);
-typedef DpfPirStatus (*DpfPirDecryptRequestFn)(const DpfPirBuffer* request, DpfPirBuffer* decrypted, void* user_data);
-
 // Server configuration
 typedef struct {
     DpfPirServerRole role;
     DpfPirDatabase database;
-    union {
-        DpfPirForwardRequestFn forward_fn;
-        DpfPirDecryptRequestFn decrypt_fn;
-    } callbacks;
-    void* callback_user_data;
+    distributed_point_functions::PirConfig pir_config;
 } DpfPirServerConfig;
 
 // Creates a new DPF PIR server
