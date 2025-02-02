@@ -31,7 +31,7 @@ pub struct DpfPirRequest {
 
 #[repr(C)]
 pub struct DpfPirConfig {
-    database_size: u64,
+    pub database_size: u64,
 }
 
 pub type ForwardHelperRequestFn = Box<dyn Fn(&[u8], &str) -> Result<Vec<u8>, DpfError> + Send + Sync>;

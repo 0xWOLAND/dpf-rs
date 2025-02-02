@@ -7,7 +7,8 @@ cc_library(
     deps = [
         "@google_dpf//pir:dense_dpf_pir_database",
     ],
-    copts = ["-std=c++17"],
+    copts = ["-std=c++17", "-fexceptions"],  # Ensure exceptions are enabled
+    linkopts = ["-lc++"],  # Explicitly link against C++ standard library
 )
 
 cc_library(
@@ -18,7 +19,8 @@ cc_library(
         "@google_dpf//pir:private_information_retrieval_cc_proto",
         "@google_dpf//pir:dense_dpf_pir_client",
     ],
-    copts = ["-std=c++17"],
+    copts = ["-std=c++17", "-fexceptions"],  # Ensure exceptions are enabled
+    linkopts = ["-lc++"],  # Explicitly link against C++ standard library
 )
 
 cc_library(
@@ -29,5 +31,6 @@ cc_library(
         "@google_dpf//pir:dense_dpf_pir_database",
         "@google_dpf//pir:dense_dpf_pir_server",
     ],
-    copts = ["-std=c++17"],
+    copts = ["-std=c++17", "-fexceptions"],  # Ensure exceptions are enabled
+    linkopts = ["-lc++"],  # Explicitly link against C++ standard library
 )

@@ -17,3 +17,9 @@ rust_library(
         "@crates//:libc",
     ],
 )
+
+rust_test(
+    name = "dpf_pir_test",
+    crate = ":dpf_pir",
+    deps = [],
+)
