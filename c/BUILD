@@ -5,12 +5,7 @@ cc_library(
     srcs = ["database.cc"],
     hdrs = ["database.h"],
     deps = [
-        "@google_dpf//pir:pir_client",
-        "@google_dpf//pir:pir_server",
-        "@google_dpf//pir:private_information_retrieval_cc_proto",
         "@google_dpf//pir:dense_dpf_pir_database",
-        "@google_dpf//pir:dense_dpf_pir_client",
-        "@google_dpf//pir:dense_dpf_pir_server",
     ],
     copts = ["-std=c++17"],
 )
@@ -20,12 +15,8 @@ cc_library(
     srcs = ["client.cc"],
     hdrs = ["client.h"],
     deps = [
-        "@google_dpf//pir:pir_client",
-        "@google_dpf//pir:pir_server",
         "@google_dpf//pir:private_information_retrieval_cc_proto",
-        "@google_dpf//pir:dense_dpf_pir_database",
         "@google_dpf//pir:dense_dpf_pir_client",
-        "@google_dpf//pir:dense_dpf_pir_server",
     ],
     copts = ["-std=c++17"],
 )
@@ -35,11 +26,7 @@ cc_library(
     srcs = ["server.cc"],
     hdrs = ["server.h"],
     deps = [
-        "@google_dpf//pir:pir_client",
-        "@google_dpf//pir:pir_server",
-        "@google_dpf//pir:private_information_retrieval_cc_proto",
         "@google_dpf//pir:dense_dpf_pir_database",
-        "@google_dpf//pir:dense_dpf_pir_client",
         "@google_dpf//pir:dense_dpf_pir_server",
     ],
     copts = ["-std=c++17"],

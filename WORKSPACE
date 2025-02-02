@@ -7,8 +7,6 @@ http_archive(
     sha256 = "c43fc82a2dc2d82cb38c7ac601118359c321f2f67c6c83416012b74af62bcc6f",
 )
 
-load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-
 # rules_proto defines abstract rules for building Protocol Buffers.
 # https://github.com/bazelbuild/rules_proto
 http_archive(
@@ -25,34 +23,6 @@ load("@rules_proto//proto:repositories.bzl", "rules_proto_dependencies", "rules_
 rules_proto_dependencies()
 
 rules_proto_toolchains()
-
-# rules_cc defines rules for generating C++ code from Protocol Buffers.
-# https://github.com/bazelbuild/rules_cc
-http_archive(
-    name = "rules_cc",
-    sha256 = "2ec47508f4a3d84fd57aaa1e26c964d5113a6426489fb46ca8b6ec2496099c38",
-    strip_prefix = "rules_cc-be9ff3eb412c5781eabd4a4b7b81de8b95da7b84",
-    urls = [
-        "https://github.com/bazelbuild/rules_cc/archive/be9ff3eb412c5781eabd4a4b7b81de8b95da7b84.zip",
-    ],
-)
-
-load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies")
-
-rules_cc_dependencies()
-
-# To find additional information on this release or newer ones visit:
-# https://github.com/bazelbuild/rules_rust/releases
-http_archive(
-    name = "rules_rust",
-    integrity = "sha256-Weev1uz2QztBlDA88JX6A1N72SucD1V8lBsaliM0TTg=",
-    urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.48.0/rules_rust-v0.48.0.tar.gz"],
-)
-
-load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
-
-rules_rust_dependencies()
-rust_register_toolchains()
 
 
 # io_bazel_rules_go defines rules for generating C++ code from Protocol Buffers.
@@ -231,12 +201,4 @@ http_archive(
     urls = [
         "https://github.com/google/shell-encryption/archive/cd1721d1ee9e20be16954f8161b0dbc051af4399.zip",
     ],
-)
-
-http_archive(
-    name = "com_github_nlohmann_json",
-    build_file = "//:BUILD", # see below
-    sha256 = "4cf0df69731494668bdd6460ed8cb269b68de9c19ad8c27abc24cd72605b2d5b",
-    strip_prefix = "json-3.9.1",
-    urls = ["https://github.com/nlohmann/json/archive/v3.9.1.tar.gz"],
 )
