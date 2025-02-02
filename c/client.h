@@ -1,17 +1,23 @@
-#ifndef DPF_PIR_CLIENT_H_
-#define DPF_PIR_CLIENT_H_
+#ifndef DISTRIBUTED_POINT_FUNCTIONS_PIR_DENSE_DPF_PIR_CLIENT_C_H_
+#define DISTRIBUTED_POINT_FUNCTIONS_PIR_DENSE_DPF_PIR_CLIENT_C_H_
+
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#include <stddef.h>
-#include <stdint.h>
-
-// Opaque handle to the client
+// Opaque handle to the DPF PIR client
 typedef struct DpfPirClient_st* DpfPirClient;
 
-// Status codes for operations
+// Buffer structure for data transfer
+typedef struct {
+    uint8_t* data;
+    size_t size;
+} DpfPirBuffer;
+
+// Status codes
 typedef enum {
     DPF_PIR_OK = 0,
     DPF_PIR_INVALID_ARGUMENT = 1,
@@ -20,57 +26,65 @@ typedef enum {
     DPF_PIR_INTERNAL_ERROR = 4
 } DpfPirStatus;
 
-// Request structure
+// Client configuration
 typedef struct {
-    uint8_t* data;
-    size_t size;
-} DpfPirBuffer;
+    uint64_t database_size;
+} DpfPirConfig;
 
+// Request state and data
 typedef struct {
     DpfPirBuffer leader_request;
     DpfPirBuffer helper_request;
-    DpfPirBuffer client_state;
+    DpfPirBuffer client_state;  // needed to handle the response
 } DpfPirRequest;
 
-// Configuration structure
+// Response structure
 typedef struct {
-    int32_t database_size;
-    const char* encryption_context;
-} DpfPirConfig;
+    char** values;      // Array of retrieved values
+    size_t* lengths;    // Array of value lengths
+    size_t num_values;  // Number of values in the response
+} DpfPirResponse;
 
-// Creates a new DPF PIR client
+// Callback for encrypting helper requests
+typedef DpfPirStatus (*DpfPirEncryptRequestFn)(
+    const DpfPirBuffer* plaintext,
+    const char* context_info,
+    DpfPirBuffer* ciphertext,
+    void* user_data);
+
+// Client creation and management
 DpfPirStatus dpf_pir_client_create(
     const DpfPirConfig* config,
+    DpfPirEncryptRequestFn encrypt_fn,
+    void* user_data,
+    const char* encryption_context_info,
     DpfPirClient* client);
 
-// Destroys a DPF PIR client
-void dpf_pir_client_destroy(DpfPirClient client);
-
-// Creates a request for specific indices
+// Create a request for specific indices
 DpfPirStatus dpf_pir_client_create_request(
     DpfPirClient client,
-    const int32_t* indices,
-    size_t num_indices,
-    DpfPirRequest* request);
+    const int32_t* indices,      // Array of indices to query
+    size_t num_indices,          // Number of indices
+    DpfPirRequest* request);     // Output request
 
-// Frees memory associated with a request
-void dpf_pir_request_free(DpfPirRequest* request);
-
-// Handles response from the server
+// Handle server response
 DpfPirStatus dpf_pir_client_handle_response(
     DpfPirClient client,
     const DpfPirBuffer* response,
     const DpfPirBuffer* client_state,
-    DpfPirBuffer* result);
+    DpfPirResponse* result);
 
-// Frees a buffer
+// Memory management
+void dpf_pir_client_destroy(DpfPirClient client);
+void dpf_pir_request_free(DpfPirRequest* request);
+void dpf_pir_response_free(DpfPirResponse* response);
 void dpf_pir_buffer_free(DpfPirBuffer* buffer);
 
-// Gets the last error message
+// Error handling
 const char* dpf_pir_get_last_error(void);
 
 #ifdef __cplusplus
-}
+}  // extern "C"
 #endif
 
-#endif  // DPF_PIR_CLIENT_H_
+#endif  // DISTRIBUTED_POINT_FUNCTIONS_PIR_DENSE_DPF_PIR_CLIENT_C_H_

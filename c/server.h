@@ -1,31 +1,23 @@
-#pragma once
+#ifndef DISTRIBUTED_POINT_FUNCTIONS_PIR_DENSE_DPF_PIR_SERVER_C_H_
+#define DISTRIBUTED_POINT_FUNCTIONS_PIR_DENSE_DPF_PIR_SERVER_C_H_
 
-#include <memory>
-#include <string>
-#include <vector>
+#include <stddef.h>
+#include <stdint.h>
 
-#include "external/google_dpf/pir/dense_dpf_pir_server.h"
-#include "external/google_dpf/pir/private_information_retrieval.pb.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-// Add these macro definitions
-#define DPF_RETURN_IF_ERROR(expr) \
-  do { \
-    auto _status = (expr); \
-    if (!_status.ok()) return _status; \
-  } while (0)
-
-#define DPF_ASSIGN_OR_RETURN(lhs, rexpr) \
-  auto _status_or = (rexpr); \
-  if (!_status_or.ok()) return _status_or.status(); \
-  lhs = std::move(_status_or).value()
-
-// Forward declaration of database handle
-typedef struct DpfPirDatabase_st* DpfPirDatabase;
-
-// Opaque handle to the server
+// Opaque handle to the DPF PIR server
 typedef struct DpfPirServer_st* DpfPirServer;
 
-// Status codes (shared with client)
+// Buffer structure for data transfer
+typedef struct {
+    uint8_t* data;
+    size_t size;
+} DpfPirBuffer;
+
+// Status codes
 typedef enum {
     DPF_PIR_OK = 0,
     DPF_PIR_INVALID_ARGUMENT = 1,
@@ -34,46 +26,72 @@ typedef enum {
     DPF_PIR_INTERNAL_ERROR = 4
 } DpfPirStatus;
 
-// Buffer structure (shared with client)
-typedef struct {
-    uint8_t* data;
-    size_t size;
-} DpfPirBuffer;
-
-// Server roles
-typedef enum {
-    DPF_PIR_SERVER_LEADER = 0,
-    DPF_PIR_SERVER_HELPER = 1
-} DpfPirServerRole;
-
 // Server configuration
 typedef struct {
-    DpfPirServerRole role;
-    DpfPirDatabase database;
-    distributed_point_functions::PirConfig pir_config;
-} DpfPirServerConfig;
+    uint64_t num_elements;   // Number of elements in the database
+} DpfPirConfig;
 
-// Creates a new DPF PIR server
-DpfPirStatus dpf_pir_server_create(
-    const DpfPirServerConfig* config,
+// Request structure
+typedef struct {
+    DpfPirBuffer leader_request;  // For leader server
+    DpfPirBuffer helper_request;  // For helper server
+} DpfPirRequest;
+
+// Response structure
+typedef struct {
+    DpfPirBuffer response;
+} DpfPirResponse;
+
+// Callback type for forwarding helper requests (used by leader)
+typedef DpfPirStatus (*DpfPirForwardHelperRequestFn)(
+    const DpfPirBuffer* request,
+    DpfPirBuffer* response,
+    void* user_data);
+
+// Callback type for decrypting helper requests
+typedef DpfPirStatus (*DpfPirDecryptHelperRequestFn)(
+    const DpfPirBuffer* ciphertext,
+    const char* context_info,
+    DpfPirBuffer* plaintext,
+    void* user_data);
+
+// Server creation functions
+DpfPirStatus dpf_pir_server_create_leader(
+    const DpfPirConfig* config,
+    void* database,             // Database handle from dpf_pir_database_c.h
+    DpfPirForwardHelperRequestFn forward_fn,
+    void* user_data,
     DpfPirServer* server);
 
-// Destroys a DPF PIR server
-void dpf_pir_server_destroy(DpfPirServer server);
+DpfPirStatus dpf_pir_server_create_helper(
+    const DpfPirConfig* config,
+    void* database,             // Database handle from dpf_pir_database_c.h
+    DpfPirDecryptHelperRequestFn decrypt_fn,
+    void* user_data,
+    DpfPirServer* server);
 
-// Gets public parameters for the server
-DpfPirStatus dpf_pir_server_get_public_params(
-    DpfPirServer server,
-    DpfPirBuffer* params);
+DpfPirStatus dpf_pir_server_create_plain(
+    const DpfPirConfig* config,
+    void* database,             // Database handle from dpf_pir_database_c.h
+    DpfPirServer* server);
 
-// Handles a request from a client
+// Handle PIR request
 DpfPirStatus dpf_pir_server_handle_request(
     DpfPirServer server,
-    const DpfPirBuffer* request,
-    DpfPirBuffer* response);
+    const DpfPirRequest* request,
+    DpfPirResponse* response);
 
-// Frees a buffer (shared with client)
+// Memory management
+void dpf_pir_server_destroy(DpfPirServer server);
 void dpf_pir_buffer_free(DpfPirBuffer* buffer);
+void dpf_pir_request_free(DpfPirRequest* request);
+void dpf_pir_response_free(DpfPirResponse* response);
 
-// Gets the last error message (shared with client)
+// Error handling
 const char* dpf_pir_get_last_error(void);
+
+#ifdef __cplusplus
+}  // extern "C"
+#endif
+
+#endif  // DISTRIBUTED_POINT_FUNCTIONS_PIR_DENSE_DPF_PIR_SERVER_C_H_

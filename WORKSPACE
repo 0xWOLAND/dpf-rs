@@ -41,6 +41,20 @@ load("@rules_cc//cc:repositories.bzl", "rules_cc_dependencies")
 
 rules_cc_dependencies()
 
+# To find additional information on this release or newer ones visit:
+# https://github.com/bazelbuild/rules_rust/releases
+http_archive(
+    name = "rules_rust",
+    integrity = "sha256-Weev1uz2QztBlDA88JX6A1N72SucD1V8lBsaliM0TTg=",
+    urls = ["https://github.com/bazelbuild/rules_rust/releases/download/0.48.0/rules_rust-v0.48.0.tar.gz"],
+)
+
+load("@rules_rust//rust:repositories.bzl", "rules_rust_dependencies", "rust_register_toolchains")
+
+rules_rust_dependencies()
+rust_register_toolchains()
+
+
 # io_bazel_rules_go defines rules for generating C++ code from Protocol Buffers.
 # https://github.com/bazelbuild/rules_go
 http_archive(
