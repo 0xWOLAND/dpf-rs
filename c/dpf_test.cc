@@ -52,7 +52,7 @@ class PirE2ETest : public ::testing::Test {
       client_ = nullptr;
     }
     
-    pir_cleanup();
+    pir_server_cleanup();
     pir_client_cleanup();
   }
 

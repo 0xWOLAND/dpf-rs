@@ -20,7 +20,6 @@ pir_status_t pir_client_create(
 );
 
 // Generate PIR requests for given indices
-// requests_json will be allocated by the function and must be freed with pir_client_free_string
 pir_status_t pir_client_generate_requests(
     void* client_handle,
     const int* indices,
@@ -29,7 +28,6 @@ pir_status_t pir_client_generate_requests(
 );
 
 // Process responses from both servers
-// merged_result will be allocated by the function and must be freed with pir_client_free_string
 pir_status_t pir_client_process_responses(
     const char* responses_json,
     char** merged_result

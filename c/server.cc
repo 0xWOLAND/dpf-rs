@@ -54,7 +54,7 @@ pir_status_t pir_initialize(void) {
     return PIR_SUCCESS;
 }
 
-void pir_cleanup(void) {
+void pir_server_cleanup(void) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_initialized) {
         return;

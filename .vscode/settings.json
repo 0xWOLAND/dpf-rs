@@ -72,6 +72,7 @@
         "variant": "cpp",
         "algorithm": "cpp",
         "*.inc": "cpp",
-        "utility": "cpp"
+        "utility": "cpp",
+        "thread": "cpp"
     }
 }
