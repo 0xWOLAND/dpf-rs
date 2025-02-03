@@ -5,25 +5,44 @@
 extern "C" {
 #endif
 
-// Opaque pointer to client state
-typedef struct PirClientWrapper PirClientWrapper;
+#include "status.h"
+
+// Initialize the PIR client system. Must be called before creating any clients
+pir_status_t pir_client_initialize(void);
+
+// Cleanup the PIR client system. Should be called when completely done with PIR
+void pir_client_cleanup(void);
 
 // Create a new PIR client instance
-PirClientWrapper* pir_client_create(int database_size);
+pir_status_t pir_client_create(
+    int database_size,
+    void** client_handle
+);
 
 // Generate PIR requests for given indices
-// Returns a JSON string containing both requests that must be freed using pir_client_free_string
-char* pir_client_generate_requests(PirClientWrapper* client, const int* indices, int num_indices);
+// requests_json will be allocated by the function and must be freed with pir_client_free_string
+pir_status_t pir_client_generate_requests(
+    void* client_handle,
+    const int* indices,
+    int num_indices,
+    char** requests_json
+);
 
 // Process responses from both servers
-// Returns the merged result that must be freed using pir_client_free_string
-char* pir_client_process_responses(const char* serialized_responses);
+// merged_result will be allocated by the function and must be freed with pir_client_free_string
+pir_status_t pir_client_process_responses(
+    const char* responses_json,
+    char** merged_result
+);
 
-// Free a string allocated by the client
+// Free a string allocated by the PIR client system
 void pir_client_free_string(char* str);
 
-// Destroy the client instance
-void pir_client_destroy(PirClientWrapper* client);
+// Destroy a client instance
+void pir_client_destroy(void* client_handle);
+
+// Get the last error message
+const char* pir_client_get_last_error(void);
 
 #ifdef __cplusplus
 }

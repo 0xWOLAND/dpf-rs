@@ -3,7 +3,7 @@ package(default_visibility = ["//visibility:public"])
 cc_library(
     name = "dpf_server",
     srcs = ["server.cc"],
-    hdrs = ["server.h", "base64_utils.h"],
+    hdrs = ["server.h", "base64_utils.h", "status.h"],
     deps = [
         "@google_dpf//pir/testing:request_generator",
         "@google_dpf//pir:private_information_retrieval_cc_proto",
@@ -21,7 +21,7 @@ cc_library(
 cc_library(
     name = "dpf_client",
     srcs = ["client.cc"],
-    hdrs = ["client.h", "base64_utils.h"],
+    hdrs = ["client.h", "base64_utils.h", "status.h"],
     deps = [
         "@google_dpf//pir/testing:request_generator",
         "@google_dpf//pir:private_information_retrieval_cc_proto",

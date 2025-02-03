@@ -5,22 +5,42 @@
 extern "C" {
 #endif
 
-// Opaque pointer to server state
-typedef struct PirServerWrapper PirServerWrapper;
+#include "status.h"
 
-// Create a new PIR server instance
-// If elements is NULL or num_elements is 0, generates test data
-PirServerWrapper* pir_server_create(int database_size, const char** elements, int num_elements);
+// Initialize the PIR system. Must be called before creating any servers
+pir_status_t pir_initialize(void);
+
+// Cleanup the PIR system. Should be called when completely done with PIR
+void pir_cleanup(void);
+
+// Create a new PIR server with test data
+pir_status_t pir_server_create_test(
+    int database_size,
+    void** server_handle
+);
+
+// Create a new PIR server with provided elements
+pir_status_t pir_server_create(
+    const char** elements,
+    int num_elements, 
+    void** server_handle
+);
 
 // Process a PIR request
-// Returns base64 encoded response that must be freed using pir_server_free_string
-char* pir_server_handle_request(PirServerWrapper* wrapper, const char* serialized_request_base64);
+pir_status_t pir_server_process_request(
+    void* server_handle,
+    const char* request_base64,
+    char** response_base64
+);
 
-// Free a response string
+// Free a string allocated by the PIR server
 void pir_server_free_string(char* str);
 
-// Destroy the server instance
-void pir_server_destroy(PirServerWrapper* wrapper);
+// Destroy a server instance
+void pir_server_destroy(void* server_handle);
+
+// Get the last error message
+const char* pir_get_last_error(void);
 
 #ifdef __cplusplus
 }
