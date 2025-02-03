@@ -1,256 +1,157 @@
+#include "external/google_dpf/pir/private_information_retrieval.pb.h"
+#include "external/google_dpf/pir/prng/aes_128_ctr_seeded_prng.h"
+#include "external/google_dpf/pir/testing/request_generator.h"
+#include "external/google_dpf/pir/dense_dpf_pir_client.h"
+#include "nlohmann/json.hpp"
+#include "base64_utils.h"
 #include "client.h"
 
 #include <memory>
 #include <string>
 #include <vector>
+#include <cstring>
 
-#include "absl/status/status.h"
-#include "absl/strings/string_view.h"
-#include "external/google_dpf/dpf/distributed_point_function.h"
-#include "external/google_dpf/pir/dense_dpf_pir_client.h"
-#include "external/google_dpf/pir/private_information_retrieval.pb.h"
+using namespace distributed_point_functions;
 
-using distributed_point_functions::DenseDpfPirClient;
-using distributed_point_functions::PirConfig;
-using distributed_point_functions::PirRequest;
-using distributed_point_functions::PirResponse;
-using distributed_point_functions::PirRequestClientState;
-
-namespace {
-
-// Thread-local error message storage
-thread_local std::string g_last_error;
-
-void set_last_error(const std::string& error) {
-    g_last_error = error;
-}
-
-// Helper to convert status to DpfPirStatus
-DpfPirStatus convert_status(const absl::Status& status) {
-    if (status.ok()) return DPF_PIR_OK;
-    
-    set_last_error(std::string(status.message()));
-    
-    switch (status.code()) {
-        case absl::StatusCode::kInvalidArgument:
-            return DPF_PIR_INVALID_ARGUMENT;
-        case absl::StatusCode::kFailedPrecondition:
-            return DPF_PIR_FAILED_PRECONDITION;
-        case absl::StatusCode::kResourceExhausted:
-            return DPF_PIR_OUT_OF_MEMORY;
-        default:
-            return DPF_PIR_INTERNAL_ERROR;
-    }
-}
-
-// Helper to allocate and copy buffer
-bool allocate_buffer(DpfPirBuffer* dst, const std::string& src) {
-    dst->size = src.size();
-    dst->data = static_cast<uint8_t*>(malloc(dst->size));
-    if (!dst->data) {
-        set_last_error("Failed to allocate memory");
-        return false;
-    }
-    memcpy(dst->data, src.data(), dst->size);
-    return true;
-}
-
-} // namespace
-
-struct DpfPirClient_st {
-    std::unique_ptr<DenseDpfPirClient> impl;
-    DpfPirEncryptRequestFn encrypt_fn;
-    void* user_data;
+// Opaque struct to hold client state
+struct PirClientWrapper {
+    std::unique_ptr<pir_testing::RequestGenerator> request_generator;
 };
 
 extern "C" {
 
-DpfPirStatus dpf_pir_client_create(
-    const DpfPirConfig* config,
-    DpfPirEncryptRequestFn encrypt_fn,
-    void* user_data,
-    const char* encryption_context_info,
-    DpfPirClient* client) {
+// Create a new PIR client instance
+PirClientWrapper* pir_client_create(int database_size) {
+    auto client = new PirClientWrapper();
+    auto status_or_generator = pir_testing::RequestGenerator::Create(
+        database_size, DenseDpfPirServer::kEncryptionContextInfo);
     
-    if (!config || !encrypt_fn || !client) {
-        set_last_error("Invalid arguments");
-        return DPF_PIR_INVALID_ARGUMENT;
+    if (!status_or_generator.ok()) {
+        delete client;
+        return nullptr;
+    }
+    
+    client->request_generator = std::move(status_or_generator.value());
+    return client;
+}
+
+// Generate PIR requests for given indices
+// Returns a JSON string containing both requests that must be freed by caller
+char* pir_client_generate_requests(PirClientWrapper* client, const int* indices, int num_indices) {
+    if (!client || !indices || num_indices <= 0) {
+        return nullptr;
     }
 
-    PirConfig pir_config;
-    auto* dense_config = pir_config.mutable_dense_dpf_pir_config();
-    dense_config->set_num_elements(config->database_size);
-
-    // Create encrypt function wrapper
-    auto encrypter = [encrypt_fn, user_data](
-        absl::string_view plain_pir_request,
-        absl::string_view context_info) -> absl::StatusOr<std::string> {
+    try {
+        std::vector<int> indices_vec(indices, indices + num_indices);
         
-        DpfPirBuffer plaintext = {
-            const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(plain_pir_request.data())),
-            plain_pir_request.size()
-        };
+        PirRequest request1, request2;
+        auto status_or_requests = client->request_generator->CreateDpfPirPlainRequests(indices_vec);
         
-        DpfPirBuffer ciphertext = {nullptr, 0};
-        DpfPirStatus status = encrypt_fn(
-            &plaintext,
-            context_info.data(),
-            &ciphertext,
-            user_data);
-
-        if (status != DPF_PIR_OK) {
-            return absl::InternalError("Encrypt function failed");
+        if (!status_or_requests.ok()) {
+            return nullptr;
         }
 
-        std::string result(reinterpret_cast<char*>(ciphertext.data), 
-                         ciphertext.size);
-        dpf_pir_buffer_free(&ciphertext);
+        std::tie(*request1.mutable_dpf_pir_request()->mutable_plain_request(),
+                *request2.mutable_dpf_pir_request()->mutable_plain_request()) = 
+                std::move(status_or_requests.value());
+
+        // Serialize requests
+        std::string serialized_request1, serialized_request2;
+        request1.SerializeToString(&serialized_request1);
+        request2.SerializeToString(&serialized_request2);
+
+        // Base64 encode requests
+        std::string encoded_request1 = base64_encode(
+            reinterpret_cast<const unsigned char*>(serialized_request1.c_str()), 
+            serialized_request1.length());
+        std::string encoded_request2 = base64_encode(
+            reinterpret_cast<const unsigned char*>(serialized_request2.c_str()),
+            serialized_request2.length());
+
+        // Create JSON object
+        nlohmann::json j;
+        j["request1"] = encoded_request1;
+        j["request2"] = encoded_request2;
+
+        std::string json_str = j.dump();
+        char* result = static_cast<char*>(malloc(json_str.length() + 1));
+        strcpy(result, json_str.c_str());
         return result;
-    };
-
-    auto result = DenseDpfPirClient::Create(
-        pir_config,
-        std::move(encrypter),
-        encryption_context_info ? encryption_context_info : "");
-
-    if (!result.ok()) {
-        return convert_status(result.status());
+    } catch (const std::exception& e) {
+        return nullptr;
     }
-
-    *client = new DpfPirClient_st{
-        std::move(result.value()),
-        encrypt_fn,
-        user_data
-    };
-    
-    return DPF_PIR_OK;
 }
 
-DpfPirStatus dpf_pir_client_create_request(
-    DpfPirClient client,
-    const int32_t* indices,
-    size_t num_indices,
-    DpfPirRequest* request) {
-    
-    if (!client || !indices || !request || num_indices == 0) {
-        set_last_error("Invalid arguments");
-        return DPF_PIR_INVALID_ARGUMENT;
+// Process responses from both servers
+// Returns the merged result that must be freed by caller
+char* pir_client_process_responses(const char* serialized_responses) {
+    if (!serialized_responses) {
+        return nullptr;
     }
 
-    std::vector<int> cpp_indices(indices, indices + num_indices);
-    
-    // Create plain requests
-    auto result = client->impl->CreatePlainRequests(cpp_indices);
-    if (!result.ok()) {
-        return convert_status(result.status());
-    }
-
-    auto& [leader_req, helper_req, client_state] = *result;
-    
-    // Serialize requests and state
-    std::string leader_serialized = leader_req.SerializeAsString();
-    std::string helper_serialized = helper_req.SerializeAsString();
-    std::string state_serialized = client_state.SerializeAsString();
-
-    // Allocate buffers
-    if (!allocate_buffer(&request->leader_request, leader_serialized) ||
-        !allocate_buffer(&request->helper_request, helper_serialized) ||
-        !allocate_buffer(&request->client_state, state_serialized)) {
-        dpf_pir_request_free(request);
-        return DPF_PIR_OUT_OF_MEMORY;
-    }
-
-    return DPF_PIR_OK;
-}
-
-DpfPirStatus dpf_pir_client_handle_response(
-    DpfPirClient client,
-    const DpfPirBuffer* response,
-    const DpfPirBuffer* client_state,
-    DpfPirResponse* result) {
-    
-    if (!client || !response || !client_state || !result) {
-        set_last_error("Invalid arguments");
-        return DPF_PIR_INVALID_ARGUMENT;
-    }
-
-    // Parse response and state
-    PirResponse pir_response;
-    PirRequestClientState state;
-    
-    if (!pir_response.ParseFromArray(response->data, response->size) ||
-        !state.ParseFromArray(client_state->data, client_state->size)) {
-        set_last_error("Failed to parse response or state");
-        return DPF_PIR_INVALID_ARGUMENT;
-    }
-
-    // Handle response
-    auto handle_result = client->impl->HandleResponse(pir_response, state);
-    if (!handle_result.ok()) {
-        return convert_status(handle_result.status());
-    }
-
-    // Convert result to C format
-    const auto& values = *handle_result;
-    result->num_values = values.size();
-    result->values = static_cast<char**>(malloc(values.size() * sizeof(char*)));
-    result->lengths = static_cast<size_t*>(malloc(values.size() * sizeof(size_t)));
-    
-    if (!result->values || !result->lengths) {
-        dpf_pir_response_free(result);
-        return DPF_PIR_OUT_OF_MEMORY;
-    }
-
-    for (size_t i = 0; i < values.size(); ++i) {
-        result->lengths[i] = values[i].size();
-        result->values[i] = static_cast<char*>(malloc(values[i].size()));
-        if (!result->values[i]) {
-            dpf_pir_response_free(result);
-            return DPF_PIR_OUT_OF_MEMORY;
+    try {
+        nlohmann::json responses_json = nlohmann::json::parse(serialized_responses);
+        
+        std::string serialized_response1_base64 = responses_json["response1"];
+        std::string serialized_response2_base64 = responses_json["response2"];
+        
+        std::string serialized_response1 = base64_decode(serialized_response1_base64);
+        std::string serialized_response2 = base64_decode(serialized_response2_base64);
+        
+        PirResponse deserialized_response1, deserialized_response2;
+        if (!deserialized_response1.ParseFromString(serialized_response1) ||
+            !deserialized_response2.ParseFromString(serialized_response2)) {
+            return nullptr;
         }
-        memcpy(result->values[i], values[i].data(), values[i].size());
-    }
 
-    return DPF_PIR_OK;
-}
+        if (deserialized_response1.dpf_pir_response().masked_response_size() !=
+            deserialized_response2.dpf_pir_response().masked_response_size()) {
+            return nullptr;
+        }
 
-void dpf_pir_client_destroy(DpfPirClient client) {
-    delete client;
-}
-
-void dpf_pir_request_free(DpfPirRequest* request) {
-    if (request) {
-        dpf_pir_buffer_free(&request->leader_request);
-        dpf_pir_buffer_free(&request->helper_request);
-        dpf_pir_buffer_free(&request->client_state);
-    }
-}
-
-void dpf_pir_response_free(DpfPirResponse* response) {
-    if (response) {
-        if (response->values) {
-            for (size_t i = 0; i < response->num_values; ++i) {
-                free(response->values[i]);
+        std::vector<std::string> result;
+        for (int i = 0; i < deserialized_response1.dpf_pir_response().masked_response_size(); i++) {
+            if (deserialized_response1.dpf_pir_response().masked_response(i).size() !=
+                deserialized_response2.dpf_pir_response().masked_response(i).size()) {
+                return nullptr;
             }
-            free(response->values);
+
+            result.emplace_back(
+                deserialized_response1.dpf_pir_response().masked_response(i).size(), '\0');
+            
+            for (int j = 0; j < deserialized_response1.dpf_pir_response().masked_response(i).size(); ++j) {
+                result.back()[j] =
+                    deserialized_response1.dpf_pir_response().masked_response(i)[j] ^
+                    deserialized_response2.dpf_pir_response().masked_response(i)[j];
+            }
         }
-        free(response->lengths);
-        response->values = nullptr;
-        response->lengths = nullptr;
-        response->num_values = 0;
+
+        // Join results with commas
+        std::string final_result;
+        for (size_t i = 0; i < result.size(); ++i) {
+            final_result += result[i];
+            if (i < result.size() - 1) {
+                final_result += ", ";
+            }
+        }
+
+        char* output = static_cast<char*>(malloc(final_result.length() + 1));
+        strcpy(output, final_result.c_str());
+        return output;
+    } catch (const std::exception& e) {
+        return nullptr;
     }
 }
 
-void dpf_pir_buffer_free(DpfPirBuffer* buffer) {
-    if (buffer) {
-        free(buffer->data);
-        buffer->data = nullptr;
-        buffer->size = 0;
-    }
+// Free memory allocated by the client
+void pir_client_free_string(char* str) {
+    free(str);
 }
 
-const char* dpf_pir_get_last_error() {
-    return g_last_error.c_str();
+// Destroy the client instance
+void pir_client_destroy(PirClientWrapper* client) {
+    delete client;
 }
 
 } // extern "C"
