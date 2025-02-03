@@ -1,17 +1,8 @@
 use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::ptr;
-use thiserror::Error;
 
-// FFI bindings
-#[repr(C)]
-#[derive(Debug, PartialEq)]
-pub enum PirStatus {
-    Success = 0,
-    ErrorInvalidArgument = -1,
-    ErrorMemory = -2,
-    ErrorProcessing = -3,
-}
+use crate::{PirStatus, PirError};
 
 #[link(name = "dpf_client", kind = "static")]
 extern "C" {
@@ -38,21 +29,6 @@ extern "C" {
     fn pir_client_free_string(str: *mut c_char);
     fn pir_client_destroy(client_handle: *mut c_void);
     fn pir_client_get_last_error() -> *const c_char;
-}
-
-// Safe interface
-#[derive(Error, Debug)]
-pub enum PirError {
-    #[error("Invalid argument: {0}")]
-    InvalidArgument(String),
-    #[error("Memory error: {0}")]
-    Memory(String),
-    #[error("Processing error: {0}")]
-    Processing(String),
-    #[error("Invalid UTF-8 in response: {0}")]
-    Utf8Error(#[from] std::str::Utf8Error),
-    #[error("FFI error: {0}")]
-    FfiError(String),
 }
 
 pub struct PirClient {
@@ -173,11 +149,9 @@ mod tests {
         let client = PirClient::new(100)?;
         let indices = vec![1, 2, 3];
         
-        // Generate requests
         let requests_json = client.generate_requests(&indices)?;
         assert!(!requests_json.is_empty());
 
-        // Process mock responses
         let mock_responses = r#"{"response1": "base64data1", "response2": "base64data2"}"#;
         let result = client.process_responses(mock_responses)?;
         assert!(!result.is_empty());
@@ -189,22 +163,18 @@ mod tests {
     fn test_error_handling() {
         initialize().unwrap();
         
-        // Test invalid database size
         assert!(matches!(
             PirClient::new(-1),
             Err(PirError::InvalidArgument(_))
         ));
 
-        // Test with valid client
         let client = PirClient::new(100).unwrap();
 
-        // Test invalid indices
         assert!(matches!(
             client.generate_requests(&[]),
             Err(PirError::InvalidArgument(_))
         ));
 
-        // Test invalid response JSON
         assert!(matches!(
             client.process_responses("invalid json"),
             Err(PirError::Processing(_))
