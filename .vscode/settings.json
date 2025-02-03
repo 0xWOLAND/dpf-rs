@@ -71,6 +71,7 @@
         "valarray": "cpp",
         "variant": "cpp",
         "algorithm": "cpp",
-        "*.inc": "cpp"
+        "*.inc": "cpp",
+        "utility": "cpp"
     }
 }

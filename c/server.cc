@@ -1,303 +1,139 @@
+#include "external/google_dpf/pir/private_information_retrieval.pb.h"
+#include "external/google_dpf/pir/prng/aes_128_ctr_seeded_prng.h"
+#include "external/google_dpf/pir/testing/request_generator.h"
+#include "external/google_dpf/pir/testing/mock_pir_database.h"
+#include "external/google_dpf/pir/dense_dpf_pir_database.h"
+#include "external/google_dpf/pir/dense_dpf_pir_server.h"
+#include "nlohmann/json.hpp"
+#include "base64_utils.h"
 #include "server.h"
 
 #include <memory>
 #include <string>
 #include <vector>
+#include <cstring>
 
-#include "absl/functional/any_invocable.h"
-#include "absl/status/status.h"
-#include "absl/strings/string_view.h"
-#include "external/google_dpf/dpf/distributed_point_function.h"
-#include "external/google_dpf/pir/dense_dpf_pir_database.h"
-#include "external/google_dpf/pir/dense_dpf_pir_server.h"
-#include "external/google_dpf/pir/private_information_retrieval.pb.h"
+using namespace distributed_point_functions;
 
-using distributed_point_functions::DenseDpfPirServer;
-using distributed_point_functions::PirConfig;
-using distributed_point_functions::PirRequest;
-using distributed_point_functions::PirResponse;
+// Constants
+constexpr int kBitsPerBlock = 128;
 
-namespace {
-
-// Thread-local error message storage
-thread_local std::string g_last_error;
-
-void set_last_error(const std::string& error) {
-    g_last_error = error;
-}
-
-// Helper to convert status to DpfPirStatus
-DpfPirStatus convert_status(const absl::Status& status) {
-    if (status.ok()) return DPF_PIR_OK;
-    
-    set_last_error(std::string(status.message()));
-    
-    switch (status.code()) {
-        case absl::StatusCode::kInvalidArgument:
-            return DPF_PIR_INVALID_ARGUMENT;
-        case absl::StatusCode::kFailedPrecondition:
-            return DPF_PIR_FAILED_PRECONDITION;
-        case absl::StatusCode::kResourceExhausted:
-            return DPF_PIR_OUT_OF_MEMORY;
-        default:
-            return DPF_PIR_INTERNAL_ERROR;
-    }
-}
-
-// Helper to allocate and copy buffer
-bool allocate_buffer(DpfPirBuffer* dst, const std::string& src) {
-    dst->size = src.size();
-    dst->data = static_cast<uint8_t*>(malloc(dst->size));
-    if (!dst->data) {
-        set_last_error("Failed to allocate memory");
-        return false;
-    }
-    memcpy(dst->data, src.data(), dst->size);
-    return true;
-}
-
-} // namespace
-
-struct DpfPirServer_st {
-    std::unique_ptr<DenseDpfPirServer> impl;
-    // Store callbacks and user data for leader/helper
-    DpfPirForwardHelperRequestFn forward_fn;
-    DpfPirDecryptHelperRequestFn decrypt_fn;
-    void* user_data;
+// Opaque struct to hold server state
+struct PirServerWrapper {
+    std::unique_ptr<DenseDpfPirServer> server;
+    std::unique_ptr<DenseDpfPirServer::Database> database;
+    std::unique_ptr<DistributedPointFunction> dpf;
+    std::vector<std::string> elements;
+    PirConfig config;
+    DpfParameters params;
 };
 
 extern "C" {
 
-DpfPirStatus dpf_pir_server_create_leader(
-    const DpfPirConfig* config,
-    void* database,
-    DpfPirForwardHelperRequestFn forward_fn,
-    void* user_data,
-    DpfPirServer* server) {
+// Create a new PIR server instance
+PirServerWrapper* pir_server_create(int database_size, const char** elements, int num_elements) {
+    auto wrapper = new PirServerWrapper();
     
-    if (!config || !database || !forward_fn || !server) {
-        set_last_error("Invalid arguments");
-        return DPF_PIR_INVALID_ARGUMENT;
-    }
+    try {
+        // Setup config
+        wrapper->config.mutable_dense_dpf_pir_config()->set_num_elements(database_size);
 
-    PirConfig pir_config;
-    auto* dense_config = pir_config.mutable_dense_dpf_pir_config();
-    dense_config->set_num_elements(config->num_elements);
+        // Setup DPF parameters
+        wrapper->params.mutable_value_type()->mutable_xor_wrapper()->set_bitsize(kBitsPerBlock);
+        wrapper->params.set_log_domain_size(
+            static_cast<int>(std::ceil(std::log2(database_size))));
 
-    // Create forward function wrapper
-    auto sender = [forward_fn, user_data](
-        const PirRequest& request,
-        absl::AnyInvocable<void()> while_waiting) -> absl::StatusOr<PirResponse> {
-        
-        // Serialize request
-        DpfPirBuffer helper_request;
-        std::string serialized = request.SerializeAsString();
-        if (!allocate_buffer(&helper_request, serialized)) {
-            return absl::ResourceExhaustedError("Failed to allocate helper request buffer");
+        // Create DPF instance
+        auto status_or_dpf = DistributedPointFunction::Create(wrapper->params);
+        if (!status_or_dpf.ok()) {
+            delete wrapper;
+            return nullptr;
+        }
+        wrapper->dpf = std::move(status_or_dpf.value());
+
+        // Setup database elements
+        if (elements && num_elements > 0) {
+            wrapper->elements.reserve(num_elements);
+            for (int i = 0; i < num_elements; i++) {
+                wrapper->elements.push_back(elements[i]);
+            }
+        } else {
+            auto status_or_elements = pir_testing::GenerateCountingStrings(database_size, "Element ");
+            if (!status_or_elements.ok()) {
+                delete wrapper;
+                return nullptr;
+            }
+            wrapper->elements = std::move(status_or_elements.value());
         }
 
-        // Call user's forward function
-        DpfPirBuffer response_buffer = {nullptr, 0};
-        DpfPirStatus status = forward_fn(&helper_request, &response_buffer, user_data);
-        dpf_pir_buffer_free(&helper_request);
+        // Create database
+        auto status_or_database = pir_testing::CreateFakeDatabase<DenseDpfPirDatabase>(wrapper->elements);
+        if (!status_or_database.ok()) {
+            delete wrapper;
+            return nullptr;
+        }
+        wrapper->database = std::move(status_or_database.value());
 
-        if (status != DPF_PIR_OK) {
-            dpf_pir_buffer_free(&response_buffer);
-            return absl::InternalError("Forward function failed");
+        // Create server
+        auto status_or_server = DenseDpfPirServer::CreatePlain(wrapper->config, std::move(wrapper->database));
+        if (!status_or_server.ok()) {
+            delete wrapper;
+            return nullptr;
+        }
+        wrapper->server = std::move(status_or_server.value());
+
+        return wrapper;
+    } catch (const std::exception& e) {
+        delete wrapper;
+        return nullptr;
+    }
+}
+
+// Process a PIR request
+char* pir_server_handle_request(PirServerWrapper* wrapper, const char* serialized_request_base64) {
+    if (!wrapper || !serialized_request_base64) {
+        return nullptr;
+    }
+
+    try {
+        // Decode base64 request
+        std::string serialized_request = base64_decode(serialized_request_base64);
+        
+        // Deserialize request
+        PirRequest deserialized_request;
+        if (!deserialized_request.ParseFromString(serialized_request)) {
+            return nullptr;
         }
 
-        // Parse response
-        PirResponse response;
-        if (!response.ParseFromArray(response_buffer.data, response_buffer.size)) {
-            dpf_pir_buffer_free(&response_buffer);
-            return absl::InternalError("Failed to parse helper response");
-        }
-        
-        dpf_pir_buffer_free(&response_buffer);
-        return response;
-    };
-
-    // Get database pointer (need to cast from void*)
-    auto* db_ptr = static_cast<DenseDpfPirServer::Database*>(database);
-
-    auto result = DenseDpfPirServer::CreateLeader(
-        pir_config, std::unique_ptr<DenseDpfPirServer::Database>(db_ptr), 
-        std::move(sender));
-
-    if (!result.ok()) {
-        return convert_status(result.status());
-    }
-
-    *server = new DpfPirServer_st{
-        std::move(result.value()),
-        forward_fn,
-        nullptr,
-        user_data
-    };
-    
-    return DPF_PIR_OK;
-}
-
-DpfPirStatus dpf_pir_server_create_helper(
-    const DpfPirConfig* config,
-    void* database,
-    DpfPirDecryptHelperRequestFn decrypt_fn,
-    void* user_data,
-    DpfPirServer* server) {
-    
-    if (!config || !database || !decrypt_fn || !server) {
-        set_last_error("Invalid arguments");
-        return DPF_PIR_INVALID_ARGUMENT;
-    }
-
-    PirConfig pir_config;
-    auto* dense_config = pir_config.mutable_dense_dpf_pir_config();
-    dense_config->set_num_elements(config->num_elements);
-
-    // Create decrypt function wrapper
-    auto decrypter = [decrypt_fn, user_data](
-        absl::string_view ciphertext,
-        absl::string_view context_info) -> absl::StatusOr<std::string> {
-        
-        DpfPirBuffer cipher_buffer = {
-            const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(ciphertext.data())),
-            ciphertext.size()
-        };
-        
-        DpfPirBuffer plain_buffer = {nullptr, 0};
-        DpfPirStatus status = decrypt_fn(
-            &cipher_buffer, 
-            context_info.data(),
-            &plain_buffer,
-            user_data);
-
-        if (status != DPF_PIR_OK) {
-            return absl::InternalError("Decrypt function failed");
+        // Process request
+        auto status_or_response = wrapper->server->HandleRequest(deserialized_request);
+        if (!status_or_response.ok()) {
+            return nullptr;
         }
 
-        std::string result(reinterpret_cast<char*>(plain_buffer.data), 
-                         plain_buffer.size);
-        dpf_pir_buffer_free(&plain_buffer);
-        return result;
-    };
+        // Serialize response
+        std::string serialized_response;
+        status_or_response.value().SerializeToString(&serialized_response);
 
-    // Get database pointer
-    auto* db_ptr = static_cast<DenseDpfPirServer::Database*>(database);
+        // Encode to base64
+        std::string serialized_response_base64 = base64_encode(
+            reinterpret_cast<const unsigned char*>(serialized_response.data()),
+            serialized_response.size());
 
-    auto result = DenseDpfPirServer::CreateHelper(
-        pir_config, 
-        std::unique_ptr<DenseDpfPirServer::Database>(db_ptr),
-        std::move(decrypter));
-
-    if (!result.ok()) {
-        return convert_status(result.status());
-    }
-
-    *server = new DpfPirServer_st{
-        std::move(result.value()),
-        nullptr,
-        decrypt_fn,
-        user_data
-    };
-    
-    return DPF_PIR_OK;
-}
-
-DpfPirStatus dpf_pir_server_create_plain(
-    const DpfPirConfig* config,
-    void* database,
-    DpfPirServer* server) {
-    
-    if (!config || !database || !server) {
-        set_last_error("Invalid arguments");
-        return DPF_PIR_INVALID_ARGUMENT;
-    }
-
-    PirConfig pir_config;
-    auto* dense_config = pir_config.mutable_dense_dpf_pir_config();
-    dense_config->set_num_elements(config->num_elements);
-
-    // Get database pointer
-    auto* db_ptr = static_cast<DenseDpfPirServer::Database*>(database);
-
-    auto result = DenseDpfPirServer::CreatePlain(
-        pir_config,
-        std::unique_ptr<DenseDpfPirServer::Database>(db_ptr));
-
-    if (!result.ok()) {
-        return convert_status(result.status());
-    }
-
-    *server = new DpfPirServer_st{
-        std::move(result.value()),
-        nullptr,
-        nullptr,
-        nullptr
-    };
-    
-    return DPF_PIR_OK;
-}
-
-DpfPirStatus dpf_pir_server_handle_request(
-    DpfPirServer server,
-    const DpfPirRequest* request,
-    DpfPirResponse* response) {
-    
-    if (!server || !request || !response) {
-        set_last_error("Invalid arguments");
-        return DPF_PIR_INVALID_ARGUMENT;
-    }
-
-    // Parse the request
-    PirRequest pir_request;
-    if (!pir_request.ParseFromArray(request->leader_request.data, 
-                                  request->leader_request.size)) {
-        set_last_error("Failed to parse request");
-        return DPF_PIR_INVALID_ARGUMENT;
-    }
-
-    // Handle the request
-    auto result = server->impl->HandleRequest(pir_request);
-    if (!result.ok()) {
-        return convert_status(result.status());
-    }
-
-    // Serialize the response
-    std::string serialized = result.value().SerializeAsString();
-    if (!allocate_buffer(&response->response, serialized)) {
-        return DPF_PIR_OUT_OF_MEMORY;
-    }
-
-    return DPF_PIR_OK;
-}
-
-void dpf_pir_server_destroy(DpfPirServer server) {
-    delete server;
-}
-
-void dpf_pir_buffer_free(DpfPirBuffer* buffer) {
-    if (buffer) {
-        free(buffer->data);
-        buffer->data = nullptr;
-        buffer->size = 0;
+        return strdup(serialized_response_base64.c_str());
+    } catch (const std::exception& e) {
+        return nullptr;
     }
 }
 
-void dpf_pir_request_free(DpfPirRequest* request) {
-    if (request) {
-        dpf_pir_buffer_free(&request->leader_request);
-        dpf_pir_buffer_free(&request->helper_request);
-    }
+// Free a response string
+void pir_server_free_string(char* str) {
+    free(str);
 }
 
-void dpf_pir_response_free(DpfPirResponse* response) {
-    if (response) {
-        dpf_pir_buffer_free(&response->response);
-    }
-}
-
-const char* dpf_pir_get_last_error() {
-    return g_last_error.c_str();
+// Destroy the server instance
+void pir_server_destroy(PirServerWrapper* wrapper) {
+    delete wrapper;
 }
 
 } // extern "C"
