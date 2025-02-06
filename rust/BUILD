@@ -14,7 +14,14 @@ rust_library(
     deps = [
         "//c:dpf_server", 
         "//c:dpf_client", 
+        "//c:base64_utils",
         "@crates//:libc",
         "@crates//:thiserror",
     ],
+)
+
+rust_test(
+    name = "dpf_test",
+    crate = ":dpf-rs",
+    edition = "2021"
 )

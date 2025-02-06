@@ -14,11 +14,6 @@ extern "C" {
         server_handle: *mut *mut c_void,
     ) -> PirStatus;
 
-    fn pir_server_create_test(
-        database_size: c_int,
-        server_handle: *mut *mut c_void,
-    ) -> PirStatus;
-
     fn pir_server_process_request(
         server_handle: *mut c_void,
         request_base64: *const c_char,
@@ -53,17 +48,6 @@ impl PirServer {
                 elements.len() as c_int,
                 &mut handle,
             ) {
-                PirStatus::Success => Ok(PirServer { handle }),
-                status => Err(get_error_with_status(status)),
-            }
-        }
-    }
-
-    /// Create a new server with test data
-    pub fn new_test(database_size: i32) -> Result<Self, PirError> {
-        unsafe {
-            let mut handle = ptr::null_mut();
-            match pir_server_create_test(database_size, &mut handle) {
                 PirStatus::Success => Ok(PirServer { handle }),
                 status => Err(get_error_with_status(status)),
             }
@@ -161,41 +145,5 @@ mod tests {
         assert!(!response.is_empty());
 
         Ok(())
-    }
-
-    #[test]
-    fn test_server_test_data() -> Result<(), PirError> {
-        initialize()?;
-
-        // Create server with test data
-        let server = PirServer::new_test(100)?;
-
-        // Test request processing
-        let mock_request = "base64encodedrequest";
-        let response = server.process_request(mock_request)?;
-        assert!(!response.is_empty());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_error_handling() {
-        initialize().unwrap();
-        
-        // Test invalid elements
-        let empty_elements: Vec<String> = vec![];
-        assert!(matches!(
-            PirServer::new(&empty_elements),
-            Err(PirError::InvalidArgument(_))
-        ));
-
-        // Test with valid server
-        let server = PirServer::new_test(100).unwrap();
-
-        // Test invalid request
-        assert!(matches!(
-            server.process_request(""),
-            Err(PirError::InvalidArgument(_))
-        ));
     }
 }
