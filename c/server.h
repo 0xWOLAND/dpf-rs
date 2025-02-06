@@ -13,12 +13,6 @@ pir_status_t pir_initialize(void);
 // Cleanup the PIR system. Should be called when completely done with PIR
 void pir_server_cleanup(void);
 
-// Create a new PIR server with test data
-pir_status_t pir_server_create_test(
-    int database_size,
-    void** server_handle
-);
-
 // Create a new PIR server with provided elements
 pir_status_t pir_server_create(
     const char** elements,

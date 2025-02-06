@@ -1,8 +1,8 @@
 #include "client.h"
 #include "external/google_dpf/pir/private_information_retrieval.pb.h"
 #include "external/google_dpf/pir/prng/aes_128_ctr_seeded_prng.h"
-#include "external/google_dpf/pir/testing/request_generator.h"
 #include "external/google_dpf/pir/dense_dpf_pir_client.h"
+#include "external/google_dpf/dpf/distributed_point_function.h"
 #include "nlohmann/json.hpp"
 #include "base64_utils.h"
 
@@ -11,6 +11,7 @@
 #include <vector>
 #include <mutex>
 #include <cstring>
+#include <cmath>
 
 using namespace distributed_point_functions;
 
@@ -18,11 +19,16 @@ namespace {
     std::mutex g_mutex;
     std::string g_last_error;
     bool g_initialized = false;
+    constexpr int kBitsPerBlock = 128;
 }
 
 // Internal client state structure
 struct ClientState {
-    std::unique_ptr<pir_testing::RequestGenerator> request_generator;
+    std::unique_ptr<DistributedPointFunction> dpf;
+    std::string otp_seed;
+    std::string encryption_context_info;
+    int database_size;
+    DpfParameters params;
 };
 
 // Set last error message thread-safely
@@ -63,16 +69,32 @@ pir_status_t pir_client_create(int database_size, void** client_handle) {
 
     try {
         auto state = new ClientState();
-        auto status_or_generator = pir_testing::RequestGenerator::Create(
-            database_size, DenseDpfPirServer::kEncryptionContextInfo);
-        
-        if (!status_or_generator.ok()) {
-            set_last_error("Failed to create request generator");
+        state->database_size = database_size;
+        state->encryption_context_info = std::string(DenseDpfPirServer::kEncryptionContextInfo);
+
+        // Setup DPF parameters
+        state->params.mutable_value_type()->mutable_xor_wrapper()->set_bitsize(kBitsPerBlock);
+        state->params.set_log_domain_size(
+            static_cast<int>(std::ceil(std::log2(database_size))));
+
+        // Create DPF instance
+        auto status_or_dpf = DistributedPointFunction::Create(state->params);
+        if (!status_or_dpf.ok()) {
+            set_last_error("Failed to create DPF instance");
             delete state;
             return PIR_ERROR_PROCESSING;
         }
-        
-        state->request_generator = std::move(status_or_generator.value());
+        state->dpf = std::move(status_or_dpf.value());
+
+        // Generate OTP seed
+        auto status_or_seed = Aes128CtrSeededPrng::GenerateSeed();
+        if (!status_or_seed.ok()) {
+            set_last_error("Failed to generate OTP seed");
+            delete state;
+            return PIR_ERROR_PROCESSING;
+        }
+        state->otp_seed = std::move(status_or_seed.value());
+
         *client_handle = state;
         return PIR_SUCCESS;
     } catch (const std::exception& e) {
@@ -97,22 +119,37 @@ pir_status_t pir_client_generate_requests(void* client_handle, const int* indice
         auto state = static_cast<ClientState*>(client_handle);
         std::vector<int> indices_vec(indices, indices + num_indices);
         
-        PirRequest request1, request2;
-        auto status_or_requests = state->request_generator->CreateDpfPirPlainRequests(indices_vec);
-        
-        if (!status_or_requests.ok()) {
-            set_last_error("Failed to create PIR requests");
-            return PIR_ERROR_PROCESSING;
+        // Create plain requests
+        DpfPirRequest::PlainRequest request1, request2;
+        for (int index : indices_vec) {
+            if (index < 0 || index >= state->database_size) {
+                set_last_error("Index out of bounds");
+                return PIR_ERROR_INVALID_ARGUMENT;
+            }
+
+            absl::uint128 alpha = index / kBitsPerBlock;
+            XorWrapper<absl::uint128> beta(absl::uint128{1} << (index % kBitsPerBlock));
+
+            auto status_or_keys = state->dpf->GenerateKeys(alpha, beta);
+            if (!status_or_keys.ok()) {
+                set_last_error("Failed to generate DPF keys");
+                return PIR_ERROR_PROCESSING;
+            }
+
+            auto& [key1, key2] = status_or_keys.value();
+            *request1.mutable_dpf_key()->Add() = std::move(key1);
+            *request2.mutable_dpf_key()->Add() = std::move(key2);
         }
 
-        std::tie(*request1.mutable_dpf_pir_request()->mutable_plain_request(),
-                *request2.mutable_dpf_pir_request()->mutable_plain_request()) = 
-                std::move(status_or_requests.value());
+        // Create PIR requests
+        PirRequest pir_request1, pir_request2;
+        *pir_request1.mutable_dpf_pir_request()->mutable_plain_request() = std::move(request1);
+        *pir_request2.mutable_dpf_pir_request()->mutable_plain_request() = std::move(request2);
 
         // Serialize requests
         std::string serialized_request1, serialized_request2;
-        if (!request1.SerializeToString(&serialized_request1) ||
-            !request2.SerializeToString(&serialized_request2)) {
+        if (!pir_request1.SerializeToString(&serialized_request1) ||
+            !pir_request2.SerializeToString(&serialized_request2)) {
             set_last_error("Failed to serialize requests");
             return PIR_ERROR_PROCESSING;
         }
@@ -177,6 +214,7 @@ pir_status_t pir_client_process_responses(const char* responses_json, char** mer
             return PIR_ERROR_PROCESSING;
         }
 
+        // Process responses by XORing them together
         if (deserialized_response1.dpf_pir_response().masked_response_size() !=
             deserialized_response2.dpf_pir_response().masked_response_size()) {
             set_last_error("Response size mismatch");

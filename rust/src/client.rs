@@ -4,7 +4,6 @@ use std::ptr;
 
 use crate::{PirStatus, PirError};
 
-#[link(name = "dpf_client", kind = "static")]
 extern "C" {
     fn pir_client_initialize() -> PirStatus;
     fn pir_client_cleanup();

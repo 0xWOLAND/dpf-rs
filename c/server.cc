@@ -1,8 +1,6 @@
 #include "server.h"
 #include "external/google_dpf/pir/private_information_retrieval.pb.h"
 #include "external/google_dpf/pir/prng/aes_128_ctr_seeded_prng.h"
-#include "external/google_dpf/pir/testing/request_generator.h"
-#include "external/google_dpf/pir/testing/mock_pir_database.h"
 #include "external/google_dpf/pir/dense_dpf_pir_database.h"
 #include "external/google_dpf/pir/dense_dpf_pir_server.h"
 #include "base64_utils.h"
@@ -12,6 +10,7 @@
 #include <vector>
 #include <mutex>
 #include <thread>
+#include <cmath>
 
 using namespace distributed_point_functions;
 
@@ -41,6 +40,19 @@ static void set_last_error(const std::string& error) {
     g_last_error = error;
 }
 
+// Helper function to create database from elements
+template <typename Database>
+absl::StatusOr<std::unique_ptr<typename Database::Interface>>
+CreateDatabase(const std::vector<typename Database::RecordType>& elements) {
+    auto builder = std::make_unique<typename Database::Builder>();
+    
+    for (const auto& element : elements) {
+        builder->Insert(element);
+    }
+    
+    return builder->Build();
+}
+
 extern "C" {
 
 pir_status_t pir_initialize(void) {
@@ -49,7 +61,6 @@ pir_status_t pir_initialize(void) {
         return PIR_SUCCESS;
     }
     
-    // Add any necessary initialization here
     g_initialized = true;
     return PIR_SUCCESS;
 }
@@ -60,75 +71,7 @@ void pir_server_cleanup(void) {
         return;
     }
     
-    // Add any necessary cleanup here
     g_initialized = false;
-}
-
-pir_status_t pir_server_create_test(int database_size, void** server_handle) {
-    if (!g_initialized) {
-        set_last_error("PIR system not initialized");
-        return PIR_ERROR_INVALID_ARGUMENT;
-    }
-    
-    if (database_size <= 0 || !server_handle) {
-        set_last_error("Invalid arguments");
-        return PIR_ERROR_INVALID_ARGUMENT;
-    }
-
-    try {
-        auto state = new ServerState();
-        
-        // Setup config
-        state->config.mutable_dense_dpf_pir_config()->set_num_elements(database_size);
-
-        // Setup DPF parameters
-        state->params.mutable_value_type()->mutable_xor_wrapper()->set_bitsize(kBitsPerBlock);
-        state->params.set_log_domain_size(
-            static_cast<int>(std::ceil(std::log2(database_size))));
-
-        // Create DPF instance
-        auto status_or_dpf = DistributedPointFunction::Create(state->params);
-        if (!status_or_dpf.ok()) {
-            set_last_error("Failed to create DPF");
-            delete state;
-            return PIR_ERROR_PROCESSING;
-        }
-        state->dpf = std::move(status_or_dpf.value());
-
-        // Generate test elements
-        auto status_or_elements = pir_testing::GenerateCountingStrings(database_size, "Element ");
-        if (!status_or_elements.ok()) {
-            set_last_error("Failed to generate test elements");
-            delete state;
-            return PIR_ERROR_PROCESSING;
-        }
-        state->elements = std::move(status_or_elements.value());
-
-        // Create database
-        auto status_or_database = pir_testing::CreateFakeDatabase<DenseDpfPirDatabase>(state->elements);
-        if (!status_or_database.ok()) {
-            set_last_error("Failed to create database");
-            delete state;
-            return PIR_ERROR_PROCESSING;
-        }
-        state->database = std::move(status_or_database.value());
-
-        // Create server
-        auto status_or_server = DenseDpfPirServer::CreatePlain(state->config, std::move(state->database));
-        if (!status_or_server.ok()) {
-            set_last_error("Failed to create server");
-            delete state;
-            return PIR_ERROR_PROCESSING;
-        }
-        state->server = std::move(status_or_server.value());
-
-        *server_handle = state;
-        return PIR_SUCCESS;
-
-    } catch (const std::exception& e) {
-        set_last_error(std::string("Exception: ") + e.what());
-        return PIR_ERROR_PROCESSING;
-    }
 }
 
 pir_status_t pir_server_create(const char** elements, int num_elements, void** server_handle) {
@@ -174,7 +117,7 @@ pir_status_t pir_server_create(const char** elements, int num_elements, void** s
         }
 
         // Create database
-        auto status_or_database = pir_testing::CreateFakeDatabase<DenseDpfPirDatabase>(state->elements);
+        auto status_or_database = CreateDatabase<DenseDpfPirDatabase>(state->elements);
         if (!status_or_database.ok()) {
             set_last_error("Failed to create database");
             delete state;

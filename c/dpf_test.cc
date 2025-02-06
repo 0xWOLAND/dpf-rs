@@ -11,6 +11,26 @@
 namespace distributed_point_functions {
 namespace {
 
+pir_status_t create_test_server(int database_size, void** server_handle) {
+    if (!server_handle) {
+        return PIR_ERROR_INVALID_ARGUMENT;
+    }
+
+    std::vector<std::string> test_elements;
+    test_elements.reserve(database_size);
+    for (int i = 0; i < database_size; i++) {
+        test_elements.push_back("Element " + std::to_string(i));
+    }
+
+    std::vector<const char*> element_ptrs;
+    element_ptrs.reserve(database_size);
+    for (const auto& elem : test_elements) {
+        element_ptrs.push_back(elem.c_str());
+    }
+
+    return pir_server_create(element_ptrs.data(), database_size, server_handle);
+}
+
 class PirE2ETest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -100,8 +120,8 @@ TEST_F(PirE2ETest, SingleElementQuery) {
 
   // Cleanup
   pir_client_free_string(requests);
-  pir_server_free_string(response1);  // Using server free for server responses
-  pir_server_free_string(response2);  // Using server free for server responses
+  pir_server_free_string(response1);
+  pir_server_free_string(response2);
   pir_client_free_string(result);
 }
 
@@ -141,8 +161,8 @@ TEST_F(PirE2ETest, MultiElementQuery) {
 
   // Cleanup
   pir_client_free_string(requests);
-  pir_server_free_string(response1);  // Using server free for server responses
-  pir_server_free_string(response2);  // Using server free for server responses
+  pir_server_free_string(response1);
+  pir_server_free_string(response2);
   pir_client_free_string(result);
 }
 
@@ -152,11 +172,11 @@ TEST_F(PirE2ETest, GeneratedDataQuery) {
   void* gen_server2 = nullptr;
   void* gen_client = nullptr;
 
-  pir_status_t status = pir_server_create_test(100, &gen_server1);
+  pir_status_t status = create_test_server(100, &gen_server1);
   ASSERT_EQ(status, PIR_SUCCESS) << "Generated server1 creation failed: " << pir_get_last_error();
   ASSERT_NE(gen_server1, nullptr);
 
-  status = pir_server_create_test(100, &gen_server2);
+  status = create_test_server(100, &gen_server2);
   ASSERT_EQ(status, PIR_SUCCESS) << "Generated server2 creation failed: " << pir_get_last_error();
   ASSERT_NE(gen_server2, nullptr);
 
@@ -199,8 +219,8 @@ TEST_F(PirE2ETest, GeneratedDataQuery) {
 
   // Cleanup
   pir_client_free_string(requests);
-  pir_server_free_string(response1);  // Using server free for server responses
-  pir_server_free_string(response2);  // Using server free for server responses
+  pir_server_free_string(response1);
+  pir_server_free_string(response2);
   pir_client_free_string(result);
   pir_server_destroy(gen_server1);
   pir_server_destroy(gen_server2);

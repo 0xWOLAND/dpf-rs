@@ -17,22 +17,14 @@ register_toolchains("@rules_rust//proto/protobuf:default-proto-toolchain")
 rust_proto = use_extension("@rules_rust//proto:extensions.bzl", "rust_proto")
 rust_proto.repositories()
 
-crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate", isolate = True)
+crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
 crate.spec(
     package = "libc",
     version = "0.2.159",
 )
 crate.spec(
-    package = "protobuf",
-    version = "3.5.1",
-)
-crate.spec(
-    package = "semver",
-    version = "1.0.23",
-)
-crate.spec(
-    package = "bencher",
-    version = "0.1.5",
+    package = "thiserror",
+    version = "2.0.11",
 )
 crate.from_specs()
 use_repo(crate, "crates")
