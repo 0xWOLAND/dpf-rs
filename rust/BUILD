@@ -17,6 +17,8 @@ rust_library(
         "//c:base64_utils",
         "@crates//:libc",
         "@crates//:thiserror",
+        "@crates//:serde",
+        "@crates//:serde_json",
     ],
 )
 

@@ -17,13 +17,6 @@ using namespace distributed_point_functions;
 // Constants
 constexpr int kBitsPerBlock = 128;
 
-// Global state
-namespace {
-    std::mutex g_mutex;
-    std::string g_last_error;
-    bool g_initialized = false;
-}
-
 // Internal server state structure
 struct ServerState {
     std::unique_ptr<DenseDpfPirServer> server;
@@ -33,12 +26,6 @@ struct ServerState {
     PirConfig config;
     DpfParameters params;
 };
-
-// Set last error message thread-safely
-static void set_last_error(const std::string& error) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    g_last_error = error;
-}
 
 // Helper function to create database from elements
 template <typename Database>
@@ -55,33 +42,8 @@ CreateDatabase(const std::vector<typename Database::RecordType>& elements) {
 
 extern "C" {
 
-pir_status_t pir_server_initialize(void) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (g_initialized) {
-        return PIR_SUCCESS;
-    }
-    
-    g_initialized = true;
-    return PIR_SUCCESS;
-}
-
-void pir_server_cleanup(void) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_initialized) {
-        return;
-    }
-    
-    g_initialized = false;
-}
-
 pir_status_t pir_server_create(const char** elements, int num_elements, void** server_handle) {
-    if (!g_initialized) {
-        set_last_error("PIR system not initialized");
-        return PIR_ERROR_INVALID_ARGUMENT;
-    }
-
     if (!elements || num_elements <= 0 || !server_handle) {
-        set_last_error("Invalid arguments");
         return PIR_ERROR_INVALID_ARGUMENT;
     }
 
@@ -99,7 +61,6 @@ pir_status_t pir_server_create(const char** elements, int num_elements, void** s
         // Create DPF instance
         auto status_or_dpf = DistributedPointFunction::Create(state->params);
         if (!status_or_dpf.ok()) {
-            set_last_error("Failed to create DPF");
             delete state;
             return PIR_ERROR_PROCESSING;
         }
@@ -109,7 +70,6 @@ pir_status_t pir_server_create(const char** elements, int num_elements, void** s
         state->elements.reserve(num_elements);
         for (int i = 0; i < num_elements; i++) {
             if (!elements[i]) {
-                set_last_error("Invalid element pointer");
                 delete state;
                 return PIR_ERROR_INVALID_ARGUMENT;
             }
@@ -119,7 +79,6 @@ pir_status_t pir_server_create(const char** elements, int num_elements, void** s
         // Create database
         auto status_or_database = CreateDatabase<DenseDpfPirDatabase>(state->elements);
         if (!status_or_database.ok()) {
-            set_last_error("Failed to create database");
             delete state;
             return PIR_ERROR_PROCESSING;
         }
@@ -128,7 +87,6 @@ pir_status_t pir_server_create(const char** elements, int num_elements, void** s
         // Create server
         auto status_or_server = DenseDpfPirServer::CreatePlain(state->config, std::move(state->database));
         if (!status_or_server.ok()) {
-            set_last_error("Failed to create server");
             delete state;
             return PIR_ERROR_PROCESSING;
         }
@@ -138,19 +96,12 @@ pir_status_t pir_server_create(const char** elements, int num_elements, void** s
         return PIR_SUCCESS;
 
     } catch (const std::exception& e) {
-        set_last_error(std::string("Exception: ") + e.what());
         return PIR_ERROR_PROCESSING;
     }
 }
 
 pir_status_t pir_server_process_request(void* server_handle, const char* request_base64, char** response_base64) {
-    if (!g_initialized) {
-        set_last_error("PIR system not initialized");
-        return PIR_ERROR_INVALID_ARGUMENT;
-    }
-
     if (!server_handle || !request_base64 || !response_base64) {
-        set_last_error("Invalid arguments");
         return PIR_ERROR_INVALID_ARGUMENT;
     }
 
@@ -163,21 +114,18 @@ pir_status_t pir_server_process_request(void* server_handle, const char* request
         // Deserialize request
         PirRequest deserialized_request;
         if (!deserialized_request.ParseFromString(serialized_request)) {
-            set_last_error("Failed to parse request");
             return PIR_ERROR_PROCESSING;
         }
 
         // Process request
         auto status_or_response = state->server->HandleRequest(deserialized_request);
         if (!status_or_response.ok()) {
-            set_last_error("Failed to process request");
             return PIR_ERROR_PROCESSING;
         }
 
         // Serialize response
         std::string serialized_response;
         if (!status_or_response.value().SerializeToString(&serialized_response)) {
-            set_last_error("Failed to serialize response");
             return PIR_ERROR_PROCESSING;
         }
 
@@ -189,14 +137,12 @@ pir_status_t pir_server_process_request(void* server_handle, const char* request
         // Allocate and copy response
         *response_base64 = strdup(serialized_response_base64.c_str());
         if (!*response_base64) {
-            set_last_error("Memory allocation failed");
             return PIR_ERROR_MEMORY;
         }
 
         return PIR_SUCCESS;
 
     } catch (const std::exception& e) {
-        set_last_error(std::string("Exception: ") + e.what());
         return PIR_ERROR_PROCESSING;
     }
 }
@@ -206,11 +152,6 @@ void pir_server_destroy(void* server_handle) {
         auto state = static_cast<ServerState*>(server_handle);
         delete state;
     }
-}
-
-const char* pir_get_last_error(void) {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    return g_last_error.c_str();
 }
 
 void pir_server_free_string(char* str) {

@@ -34,10 +34,6 @@ pir_status_t create_test_server(int database_size, void** server_handle) {
 class PirE2ETest : public ::testing::Test {
  protected:
   void SetUp() override {
-    // Initialize PIR systems
-    ASSERT_EQ(pir_server_initialize(), PIR_SUCCESS) << "Server init failed: " << pir_get_last_error();
-    ASSERT_EQ(pir_client_initialize(), PIR_SUCCESS) << "Client init failed: " << pir_client_get_last_error();
-    
     test_elements_ = {"Element0", "Element1", "Element2", "Element3"};
     const char* elements[4] = {
         test_elements_[0].c_str(),
@@ -48,14 +44,14 @@ class PirE2ETest : public ::testing::Test {
     
     // Create two servers
     pir_status_t status = pir_server_create(elements, test_elements_.size(), &server1_);
-    ASSERT_EQ(status, PIR_SUCCESS) << "Server1 creation failed: " << pir_get_last_error();
+    ASSERT_EQ(status, PIR_SUCCESS);
     
     status = pir_server_create(elements, test_elements_.size(), &server2_);
-    ASSERT_EQ(status, PIR_SUCCESS) << "Server2 creation failed: " << pir_get_last_error();
+    ASSERT_EQ(status, PIR_SUCCESS);
 
     // Create client
     status = pir_client_create(test_elements_.size(), &client_);
-    ASSERT_EQ(status, PIR_SUCCESS) << "Client creation failed: " << pir_client_get_last_error();
+    ASSERT_EQ(status, PIR_SUCCESS);
   }
 
   void TearDown() override {
@@ -71,9 +67,6 @@ class PirE2ETest : public ::testing::Test {
       pir_client_destroy(client_);
       client_ = nullptr;
     }
-    
-    pir_server_cleanup();
-    pir_client_cleanup();
   }
 
   void* server1_ = nullptr;
@@ -87,7 +80,7 @@ TEST_F(PirE2ETest, SingleElementQuery) {
   int index = 1;  // Query for "Element1"
   char* requests = nullptr;
   pir_status_t status = pir_client_generate_requests(client_, &index, 1, &requests);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Request generation failed: " << pir_client_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(requests, nullptr);
 
   // Parse requests JSON
@@ -99,11 +92,11 @@ TEST_F(PirE2ETest, SingleElementQuery) {
   char* response1 = nullptr;
   char* response2 = nullptr;
   status = pir_server_process_request(server1_, requests_json["request1"].get<std::string>().c_str(), &response1);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Server1 processing failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(response1, nullptr);
 
   status = pir_server_process_request(server2_, requests_json["request2"].get<std::string>().c_str(), &response2);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Server2 processing failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(response2, nullptr);
 
   // Create response JSON
@@ -114,7 +107,7 @@ TEST_F(PirE2ETest, SingleElementQuery) {
   // Process responses
   char* result = nullptr;
   status = pir_client_process_responses(response_json.dump().c_str(), &result);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Response processing failed: " << pir_client_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(result, nullptr);
   EXPECT_EQ(std::string(result), "Element1");
 
@@ -130,7 +123,7 @@ TEST_F(PirE2ETest, MultiElementQuery) {
   std::vector<int> indices = {0, 2};  // Query for "Element0" and "Element2"
   char* requests = nullptr;
   pir_status_t status = pir_client_generate_requests(client_, indices.data(), indices.size(), &requests);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Request generation failed: " << pir_client_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(requests, nullptr);
 
   // Parse requests JSON
@@ -140,11 +133,11 @@ TEST_F(PirE2ETest, MultiElementQuery) {
   char* response1 = nullptr;
   char* response2 = nullptr;
   status = pir_server_process_request(server1_, requests_json["request1"].get<std::string>().c_str(), &response1);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Server1 processing failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(response1, nullptr);
 
   status = pir_server_process_request(server2_, requests_json["request2"].get<std::string>().c_str(), &response2);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Server2 processing failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(response2, nullptr);
 
   // Create response JSON
@@ -155,7 +148,7 @@ TEST_F(PirE2ETest, MultiElementQuery) {
   // Process responses
   char* result = nullptr;
   status = pir_client_process_responses(response_json.dump().c_str(), &result);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Response processing failed: " << pir_client_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(result, nullptr);
   EXPECT_EQ(std::string(result), "Element0, Element2");
 
@@ -173,22 +166,22 @@ TEST_F(PirE2ETest, GeneratedDataQuery) {
   void* gen_client = nullptr;
 
   pir_status_t status = create_test_server(100, &gen_server1);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Generated server1 creation failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(gen_server1, nullptr);
 
   status = create_test_server(100, &gen_server2);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Generated server2 creation failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(gen_server2, nullptr);
 
   status = pir_client_create(100, &gen_client);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Generated client creation failed: " << pir_client_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(gen_client, nullptr);
 
   // Generate request
   int index = 5;
   char* requests = nullptr;
   status = pir_client_generate_requests(gen_client, &index, 1, &requests);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Request generation failed: " << pir_client_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(requests, nullptr);
 
   // Parse requests JSON
@@ -198,11 +191,11 @@ TEST_F(PirE2ETest, GeneratedDataQuery) {
   char* response1 = nullptr;
   char* response2 = nullptr;
   status = pir_server_process_request(gen_server1, requests_json["request1"].get<std::string>().c_str(), &response1);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Server1 processing failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(response1, nullptr);
 
   status = pir_server_process_request(gen_server2, requests_json["request2"].get<std::string>().c_str(), &response2);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Server2 processing failed: " << pir_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(response2, nullptr);
 
   // Create response JSON
@@ -213,7 +206,7 @@ TEST_F(PirE2ETest, GeneratedDataQuery) {
   // Process responses
   char* result = nullptr;
   status = pir_client_process_responses(response_json.dump().c_str(), &result);
-  ASSERT_EQ(status, PIR_SUCCESS) << "Response processing failed: " << pir_client_get_last_error();
+  ASSERT_EQ(status, PIR_SUCCESS);
   ASSERT_NE(result, nullptr);
   EXPECT_EQ(std::string(result), "Element 5");
 

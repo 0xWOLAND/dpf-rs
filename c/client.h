@@ -7,12 +7,6 @@ extern "C" {
 
 #include "status.h"
 
-// Initialize the PIR client system. Must be called before creating any clients
-pir_status_t pir_client_initialize(void);
-
-// Cleanup the PIR client system. Should be called when completely done with PIR
-void pir_client_cleanup(void);
-
 // Create a new PIR client instance
 pir_status_t pir_client_create(
     int database_size,
@@ -38,9 +32,6 @@ void pir_client_free_string(char* str);
 
 // Destroy a client instance
 void pir_client_destroy(void* client_handle);
-
-// Get the last error message
-const char* pir_client_get_last_error(void);
 
 #ifdef __cplusplus
 }

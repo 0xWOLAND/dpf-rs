@@ -6,9 +6,6 @@ use crate::{PirError, PirStatus};
 
 #[link(name = "dpf_client")]
 extern "C" {
-    fn pir_client_initialize() -> PirStatus;
-    fn pir_client_cleanup();
-
     fn pir_client_create(database_size: c_int, client_handle: *mut *mut c_void) -> PirStatus;
 
     fn pir_client_generate_requests(
@@ -25,7 +22,6 @@ extern "C" {
 
     fn pir_client_free_string(str: *mut c_char);
     fn pir_client_destroy(client_handle: *mut c_void);
-    fn pir_client_get_last_error() -> *const c_char;
 }
 
 pub struct PirClient {
@@ -35,7 +31,6 @@ pub struct PirClient {
 impl PirClient {
     pub fn new(database_size: i32) -> Result<Self, PirError> {
         unsafe {
-            initialize()?;
             let mut handle = ptr::null_mut();
             match pir_client_create(database_size, &mut handle) {
                 PirStatus::Success => Ok(PirClient { handle }),
@@ -68,7 +63,8 @@ impl PirClient {
     pub fn process_responses(&self, responses_json: &str) -> Result<String, PirError> {
         unsafe {
             let c_responses = CString::new(responses_json)
-                .map_err(|e| PirError::InvalidArgument(e.to_string()))?;
+                // .map_err(|e| PirError::InvalidArgument(e.to_string()))?;
+                .map_err(|e| PirError::InvalidArgument)?;
             let mut merged_result = ptr::null_mut();
 
             let status = pir_client_process_responses(c_responses.as_ptr(), &mut merged_result);
@@ -89,45 +85,29 @@ impl Drop for PirClient {
     fn drop(&mut self) {
         unsafe {
             pir_client_destroy(self.handle);
-            pir_client_cleanup();
         }
     }
 }
 
-fn initialize() -> Result<(), PirError> {
-    unsafe {
-        match pir_client_initialize() {
-            PirStatus::Success => Ok(()),
-            status => Err(get_error_with_status(status)),
-        }
-    }
-}
 
 fn get_error_with_status(status: PirStatus) -> PirError {
-    let error_msg = unsafe {
-        let error_ptr = pir_client_get_last_error();
-        if error_ptr.is_null() {
-            "Unknown error".to_string()
-        } else {
-            CStr::from_ptr(error_ptr).to_string_lossy().into_owned()
-        }
-    };
-
     match status {
-        PirStatus::ErrorInvalidArgument => PirError::InvalidArgument(error_msg),
-        PirStatus::ErrorMemory => PirError::Memory(error_msg),
-        PirStatus::ErrorProcessing => PirError::Processing(error_msg),
-        _ => PirError::FfiError(error_msg),
+        PirStatus::ErrorInvalidArgument => PirError::InvalidArgument,
+        PirStatus::ErrorMemory => PirError::Memory,
+        PirStatus::ErrorProcessing => PirError::Processing,
+        _ => PirError::FfiError,
     }
 }
 
 fn c_char_to_string(ptr: *mut c_char) -> Result<String, PirError> {
     if ptr.is_null() {
-        return Err(PirError::FfiError("Null pointer received".to_string()));
+        return Err(PirError::FfiError);
     }
     unsafe {
         let c_str = CStr::from_ptr(ptr);
-        Ok(c_str.to_str()?.to_owned())
+        c_str.to_str()
+            .map_err(|e| PirError::FfiError)
+            .map(|s| s.to_owned())
     }
 }
 
@@ -155,19 +135,19 @@ mod tests {
     fn test_error_handling() {
         assert!(matches!(
             PirClient::new(-1),
-            Err(PirError::InvalidArgument(_))
+            Err(PirError::InvalidArgument)
         ));
 
         let client = PirClient::new(100).unwrap();
 
         assert!(matches!(
             client.generate_requests(&[]),
-            Err(PirError::InvalidArgument(_))
+            Err(PirError::InvalidArgument)
         ));
 
         assert!(matches!(
             client.process_responses("invalid json"),
-            Err(PirError::Processing(_))
+            Err(PirError::Processing)
         ));
     }
 }

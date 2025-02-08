@@ -15,16 +15,16 @@ pub enum PirStatus {
 
 #[derive(Error, Debug)]
 pub enum PirError {
-    #[error("Invalid argument: {0}")]
-    InvalidArgument(String),
-    #[error("Memory error: {0}")]
-    Memory(String),
-    #[error("Processing error: {0}")]
-    Processing(String),
-    #[error("Invalid UTF-8 in response: {0}")]
-    Utf8Error(#[from] std::str::Utf8Error),
-    #[error("FFI error: {0}")]
-    FfiError(String),
+    #[error("Invalid argument")]
+    InvalidArgument,
+    #[error("Memory error")]
+    Memory,
+    #[error("Processing error")]
+    Processing,
+    #[error("Invalid UTF-8 in response")]
+    Utf8Error,
+    #[error("FFI error")]
+    FfiError,
 }
 
 #[cfg(test)]
@@ -43,6 +43,6 @@ mod tests {
 
         let indices = vec![1, 2, 3];
         let requests_json = client.generate_requests(&indices).unwrap();
-        
+
     }
 }
