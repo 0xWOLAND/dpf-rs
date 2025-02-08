@@ -4,18 +4,18 @@ bazel_dep(name = "rules_rust", version = "0.51.0")
 bazel_dep(name = "nlohmann_json", version = "3.11.3.bcr.1")
 
 ## Rust
-rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
-rust.toolchain(
-    edition = "2021",
-    versions = ["1.81.0"],
-)
-use_repo(rust, "rust_toolchains")
+# rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+# rust.toolchain(
+#     edition = "2021",
+#     versions = ["1.81.0"],
+# )
+# use_repo(rust, "rust_toolchains")
 
-register_toolchains("@rust_toolchains//:all")
+# register_toolchains("@rust_toolchains//:all")
 
-register_toolchains("@rules_rust//proto/protobuf:default-proto-toolchain")
-rust_proto = use_extension("@rules_rust//proto:extensions.bzl", "rust_proto")
-rust_proto.repositories()
+# register_toolchains("@rules_rust//proto/protobuf:default-proto-toolchain")
+# rust_proto = use_extension("@rules_rust//proto:extensions.bzl", "rust_proto")
+# rust_proto.repositories()
 
 crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
 crate.spec(
