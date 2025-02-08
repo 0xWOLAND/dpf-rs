@@ -8,7 +8,7 @@ extern "C" {
 #include "status.h"
 
 // Initialize the PIR system. Must be called before creating any servers
-pir_status_t pir_initialize(void);
+pir_status_t pir_server_initialize(void);
 
 // Cleanup the PIR system. Should be called when completely done with PIR
 void pir_server_cleanup(void);

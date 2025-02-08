@@ -6,7 +6,7 @@ use crate::{PirError, PirStatus};
 
 #[link(name = "dpf_server")]
 extern "C" {
-    fn pir_initialize() -> PirStatus;
+    fn pir_server_initialize() -> PirStatus;
     fn pir_server_cleanup();
     
     fn pir_server_create(
@@ -34,6 +34,7 @@ impl PirServer {
     /// Create a new server with actual data elements
     pub fn new<T: AsRef<str>>(elements: &[T]) -> Result<Self, PirError> {
         unsafe {
+            initialize()?;
             let c_elements: Vec<*const c_char> = elements
                 .iter()
                 .map(|s| {
@@ -88,9 +89,9 @@ impl Drop for PirServer {
     }
 }
 
-pub fn initialize() -> Result<(), PirError> {
+fn initialize() -> Result<(), PirError> {
     unsafe {
-        match pir_initialize() {
+        match pir_server_initialize() {
             PirStatus::Success => Ok(()),
             status => Err(get_error_with_status(status)),
         }

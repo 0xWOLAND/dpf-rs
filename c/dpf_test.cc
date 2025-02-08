@@ -35,7 +35,7 @@ class PirE2ETest : public ::testing::Test {
  protected:
   void SetUp() override {
     // Initialize PIR systems
-    ASSERT_EQ(pir_initialize(), PIR_SUCCESS) << "Server init failed: " << pir_get_last_error();
+    ASSERT_EQ(pir_server_initialize(), PIR_SUCCESS) << "Server init failed: " << pir_get_last_error();
     ASSERT_EQ(pir_client_initialize(), PIR_SUCCESS) << "Client init failed: " << pir_client_get_last_error();
     
     test_elements_ = {"Element0", "Element1", "Element2", "Element3"};

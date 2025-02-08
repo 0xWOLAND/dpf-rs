@@ -2,17 +2,14 @@ use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::ptr;
 
-use crate::{PirStatus, PirError};
+use crate::{PirError, PirStatus};
 
 #[link(name = "dpf_client")]
 extern "C" {
     fn pir_client_initialize() -> PirStatus;
     fn pir_client_cleanup();
-    
-    fn pir_client_create(
-        database_size: c_int,
-        client_handle: *mut *mut c_void,
-    ) -> PirStatus;
+
+    fn pir_client_create(database_size: c_int, client_handle: *mut *mut c_void) -> PirStatus;
 
     fn pir_client_generate_requests(
         client_handle: *mut c_void,
@@ -38,6 +35,7 @@ pub struct PirClient {
 impl PirClient {
     pub fn new(database_size: i32) -> Result<Self, PirError> {
         unsafe {
+            initialize()?;
             let mut handle = ptr::null_mut();
             match pir_client_create(database_size, &mut handle) {
                 PirStatus::Success => Ok(PirClient { handle }),
@@ -73,10 +71,7 @@ impl PirClient {
                 .map_err(|e| PirError::InvalidArgument(e.to_string()))?;
             let mut merged_result = ptr::null_mut();
 
-            let status = pir_client_process_responses(
-                c_responses.as_ptr(),
-                &mut merged_result,
-            );
+            let status = pir_client_process_responses(c_responses.as_ptr(), &mut merged_result);
 
             match status {
                 PirStatus::Success => {
@@ -99,7 +94,7 @@ impl Drop for PirClient {
     }
 }
 
-pub fn initialize() -> Result<(), PirError> {
+fn initialize() -> Result<(), PirError> {
     unsafe {
         match pir_client_initialize() {
             PirStatus::Success => Ok(()),
@@ -114,9 +109,7 @@ fn get_error_with_status(status: PirStatus) -> PirError {
         if error_ptr.is_null() {
             "Unknown error".to_string()
         } else {
-            CStr::from_ptr(error_ptr)
-                .to_string_lossy()
-                .into_owned()
+            CStr::from_ptr(error_ptr).to_string_lossy().into_owned()
         }
     };
 
@@ -143,41 +136,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pir_client_lifecycle() -> Result<(), PirError> {
-        initialize()?;
+    fn test_print() {
+        eprintln!("Hello, world!");
+    }
 
+    #[test]
+    fn test_pir_client_lifecycle() -> Result<(), PirError> {
         let client = PirClient::new(100)?;
         let indices = vec![1, 2, 3];
-        
-        // let requests_json = client.generate_requests(&indices)?;
-        // assert!(!requests_json.is_empty());
 
-        // let mock_responses = r#"{"response1": "base64data1", "response2": "base64data2"}"#;
-        // let result = client.process_responses(mock_responses)?;
-        // assert!(!result.is_empty());
+        let requests_json = client.generate_requests(&indices)?;
+        assert!(!requests_json.is_empty());
 
         Ok(())
     }
 
-//     #[test]
-//     fn test_error_handling() {
-//         initialize().unwrap();
-        
-//         assert!(matches!(
-//             PirClient::new(-1),
-//             Err(PirError::InvalidArgument(_))
-//         ));
+    #[test]
+    fn test_error_handling() {
+        assert!(matches!(
+            PirClient::new(-1),
+            Err(PirError::InvalidArgument(_))
+        ));
 
-//         let client = PirClient::new(100).unwrap();
+        let client = PirClient::new(100).unwrap();
 
-//         assert!(matches!(
-//             client.generate_requests(&[]),
-//             Err(PirError::InvalidArgument(_))
-//         ));
+        assert!(matches!(
+            client.generate_requests(&[]),
+            Err(PirError::InvalidArgument(_))
+        ));
 
-//         assert!(matches!(
-//             client.process_responses("invalid json"),
-//             Err(PirError::Processing(_))
-//         ));
-//     }
+        assert!(matches!(
+            client.process_responses("invalid json"),
+            Err(PirError::Processing(_))
+        ));
+    }
 }

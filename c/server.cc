@@ -55,7 +55,7 @@ CreateDatabase(const std::vector<typename Database::RecordType>& elements) {
 
 extern "C" {
 
-pir_status_t pir_initialize(void) {
+pir_status_t pir_server_initialize(void) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (g_initialized) {
         return PIR_SUCCESS;

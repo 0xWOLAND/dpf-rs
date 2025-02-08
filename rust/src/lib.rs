@@ -26,3 +26,23 @@ pub enum PirError {
     #[error("FFI error: {0}")]
     FfiError(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const N: usize = 100;
+
+    #[test]
+    fn test_e2e() {
+        let test_elements = (0..N).map(|i| format!("Element{}", i)).collect::<Vec<_>>();
+
+        let client = client::PirClient::new(N as i32).unwrap();
+        let server1 = server::PirServer::new(&test_elements).unwrap();
+        let server2 = server::PirServer::new(&test_elements).unwrap();
+
+        let indices = vec![1, 2, 3];
+        let requests_json = client.generate_requests(&indices).unwrap();
+        
+    }
+}
