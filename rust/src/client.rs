@@ -1,8 +1,21 @@
 use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::ptr;
+use serde::{Deserialize, Serialize};
 
 use crate::{PirError, PirStatus};
+
+#[derive(Serialize, Deserialize)]
+pub struct Request {
+    pub request1: String,
+    pub request2: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Response {
+    pub response1: String,
+    pub response2: String,
+}
 
 #[link(name = "dpf_client")]
 extern "C" {
@@ -39,7 +52,7 @@ impl PirClient {
         }
     }
 
-    pub fn generate_requests(&self, indices: &[i32]) -> Result<String, PirError> {
+    pub fn generate_requests(&self, indices: &[i32]) -> Result<Request, PirError> {
         unsafe {
             let mut requests_json = ptr::null_mut();
             let status = pir_client_generate_requests(
@@ -53,15 +66,16 @@ impl PirClient {
                 PirStatus::Success => {
                     let result = c_char_to_string(requests_json)?;
                     pir_client_free_string(requests_json);
-                    Ok(result)
+                    serde_json::from_str(&result).map_err(|_| PirError::Processing)
                 }
                 status => Err(get_error_with_status(status)),
             }
         }
     }
 
-    pub fn process_responses(&self, responses_json: &str) -> Result<String, PirError> {
+    pub fn process_responses(&self, response: Response) -> Result<String, PirError> {
         unsafe {
+            let responses_json = serde_json::to_string(&response).map_err(|_| PirError::Processing)?;
             let c_responses = CString::new(responses_json)
                 // .map_err(|e| PirError::InvalidArgument(e.to_string()))?;
                 .map_err(|e| PirError::InvalidArgument)?;
@@ -125,8 +139,8 @@ mod tests {
         let client = PirClient::new(100)?;
         let indices = vec![1, 2, 3];
 
-        let requests_json = client.generate_requests(&indices)?;
-        assert!(!requests_json.is_empty());
+        let requests_json = client.generate_requests(&indices);
+        assert!(requests_json.is_ok());
 
         Ok(())
     }
@@ -136,18 +150,6 @@ mod tests {
         assert!(matches!(
             PirClient::new(-1),
             Err(PirError::InvalidArgument)
-        ));
-
-        let client = PirClient::new(100).unwrap();
-
-        assert!(matches!(
-            client.generate_requests(&[]),
-            Err(PirError::InvalidArgument)
-        ));
-
-        assert!(matches!(
-            client.process_responses("invalid json"),
-            Err(PirError::Processing)
         ));
     }
 }

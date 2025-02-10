@@ -30,16 +30,18 @@ impl PirServer {
     /// Create a new server with actual data elements
     pub fn new<T: AsRef<str>>(elements: &[T]) -> Result<Self, PirError> {
         unsafe {
-            let c_elements: Vec<*const c_char> = elements
+            // Create vector of CStrings first to keep them alive
+            let c_strings: Vec<CString> = elements
                 .iter()
-                .map(|s| {
-                    CString::new(s.as_ref())
-                        .map_err(|e| PirError::InvalidArgument)
-                        // .map_err(|e| PirError::InvalidArgument(e.to_string()))
-                        .map(|cs| cs.as_ptr())
-                })
+                .map(|s| CString::new(s.as_ref()).map_err(|_| PirError::InvalidArgument))
                 .collect::<Result<Vec<_>, _>>()?;
-
+    
+            // Then create vector of pointers to those CStrings
+            let c_elements: Vec<*const c_char> = c_strings
+                .iter()
+                .map(|cs| cs.as_ptr())
+                .collect();
+    
             let mut handle = ptr::null_mut();
             match pir_server_create(
                 c_elements.as_ptr(),
