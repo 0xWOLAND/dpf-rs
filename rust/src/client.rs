@@ -2,8 +2,7 @@ use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::ptr;
 use serde::{Deserialize, Serialize};
-
-use crate::{PirError, PirStatus};
+use crate::error::{PirError, PirStatus};
 
 #[derive(Serialize, Deserialize)]
 pub struct Request {
@@ -43,54 +42,65 @@ pub struct PirClient {
 
 impl PirClient {
     pub fn new(database_size: i32) -> Result<Self, PirError> {
+        if database_size <= 0 {
+            return Err(PirError::InvalidArgument);
+        }
+
         unsafe {
             let mut handle = ptr::null_mut();
-            match pir_client_create(database_size, &mut handle) {
-                PirStatus::Success => Ok(PirClient { handle }),
-                status => Err(get_error_with_status(status)),
-            }
+            let result: Result<(), PirError> = pir_client_create(database_size, &mut handle).into();
+            result.map(|_| Self { handle })
         }
     }
 
     pub fn generate_requests(&self, indices: &[i32]) -> Result<Request, PirError> {
         unsafe {
             let mut requests_json = ptr::null_mut();
-            let status = pir_client_generate_requests(
+            let result: Result<(), PirError> = pir_client_generate_requests(
                 self.handle,
                 indices.as_ptr(),
                 indices.len() as c_int,
                 &mut requests_json,
-            );
+            ).into();
 
-            match status {
-                PirStatus::Success => {
-                    let result = c_char_to_string(requests_json)?;
-                    pir_client_free_string(requests_json);
-                    serde_json::from_str(&result).map_err(|_| PirError::Processing)
+            result.and_then(|_| {
+                if requests_json.is_null() {
+                    return Err(PirError::FfiError);
                 }
-                status => Err(get_error_with_status(status)),
-            }
+                let result = CStr::from_ptr(requests_json)
+                    .to_str()
+                    .map(String::from)
+                    .map_err(|_| PirError::Utf8Error)?;
+                pir_client_free_string(requests_json);
+                serde_json::from_str(&result).map_err(|_| PirError::Processing)
+            })
         }
     }
 
     pub fn process_responses(&self, response: Response) -> Result<String, PirError> {
         unsafe {
-            let responses_json = serde_json::to_string(&response).map_err(|_| PirError::Processing)?;
+            let responses_json = serde_json::to_string(&response)
+                .map_err(|_| PirError::Processing)?;
             let c_responses = CString::new(responses_json)
-                // .map_err(|e| PirError::InvalidArgument(e.to_string()))?;
-                .map_err(|e| PirError::InvalidArgument)?;
+                .map_err(|_| PirError::InvalidArgument)?;
             let mut merged_result = ptr::null_mut();
 
-            let status = pir_client_process_responses(c_responses.as_ptr(), &mut merged_result);
+            let result: Result<(), PirError> = pir_client_process_responses(
+                c_responses.as_ptr(), 
+                &mut merged_result
+            ).into();
 
-            match status {
-                PirStatus::Success => {
-                    let result = c_char_to_string(merged_result)?;
-                    pir_client_free_string(merged_result);
-                    Ok(result)
+            result.and_then(|_| {
+                if merged_result.is_null() {
+                    return Err(PirError::FfiError);
                 }
-                status => Err(get_error_with_status(status)),
-            }
+                let result = CStr::from_ptr(merged_result)
+                    .to_str()
+                    .map(String::from)
+                    .map_err(|_| PirError::Utf8Error)?;
+                pir_client_free_string(merged_result);
+                Ok(result)
+            })
         }
     }
 }
@@ -98,30 +108,10 @@ impl PirClient {
 impl Drop for PirClient {
     fn drop(&mut self) {
         unsafe {
-            pir_client_destroy(self.handle);
+            if !self.handle.is_null() {
+                pir_client_destroy(self.handle);
+            }
         }
-    }
-}
-
-
-fn get_error_with_status(status: PirStatus) -> PirError {
-    match status {
-        PirStatus::ErrorInvalidArgument => PirError::InvalidArgument,
-        PirStatus::ErrorMemory => PirError::Memory,
-        PirStatus::ErrorProcessing => PirError::Processing,
-        _ => PirError::FfiError,
-    }
-}
-
-fn c_char_to_string(ptr: *mut c_char) -> Result<String, PirError> {
-    if ptr.is_null() {
-        return Err(PirError::FfiError);
-    }
-    unsafe {
-        let c_str = CStr::from_ptr(ptr);
-        c_str.to_str()
-            .map_err(|e| PirError::FfiError)
-            .map(|s| s.to_owned())
     }
 }
 
@@ -130,18 +120,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_print() {
-        eprintln!("Hello, world!");
-    }
-
-    #[test]
     fn test_pir_client_lifecycle() -> Result<(), PirError> {
         let client = PirClient::new(100)?;
         let indices = vec![1, 2, 3];
-
-        let requests_json = client.generate_requests(&indices);
-        assert!(requests_json.is_ok());
-
+        let requests = client.generate_requests(&indices)?;
+        assert!(!requests.request1.is_empty());
+        assert!(!requests.request2.is_empty());
         Ok(())
     }
 

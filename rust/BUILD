@@ -1,4 +1,4 @@
-load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test", "rust_binary")
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
 load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 
 package(default_visibility = ["//visibility:public"])
@@ -9,11 +9,13 @@ rust_library(
         "src/lib.rs",
         "src/client.rs",
         "src/server.rs",
+        "src/error.rs",
+        "src/types.rs",
     ],
-    edition = "2021",  
+    edition = "2021",
     deps = [
-        "//c:dpf_server", 
-        "//c:dpf_client", 
+        "//c:dpf_server",
+        "//c:dpf_client",
         "//c:base64_utils",
         "@crates//:libc",
         "@crates//:thiserror",
@@ -23,7 +25,14 @@ rust_library(
 )
 
 rust_test(
-    name = "dpf_test",
+    name = "dpf_unit_tests",
     crate = ":dpf-rs",
-    edition = "2021"
+    edition = "2021",
+)
+
+rust_test(
+    name = "dpf_integration_test",
+    srcs = ["tests/integration_test.rs"],
+    edition = "2021",
+    deps = [":dpf-rs"],
 )
