@@ -53,6 +53,24 @@ impl PirClient {
         }
     }
 
+    pub fn update_size(&mut self, new_size: i32) -> Result<(), PirError> {
+        if new_size <= 0 {
+            return Err(PirError::InvalidArgument);
+        }
+
+        let new_client = PirClient::new(new_size)?;
+        
+        unsafe {
+            if !self.handle.is_null() {
+                pir_client_destroy(self.handle);
+            }
+            self.handle = new_client.handle;
+            std::mem::forget(new_client);
+        }
+        
+        Ok(())
+    }
+
     pub fn generate_requests(&self, indices: &[i32]) -> Result<Request, PirError> {
         unsafe {
             let mut requests_json = ptr::null_mut();
@@ -126,6 +144,25 @@ mod tests {
         let requests = client.generate_requests(&indices)?;
         assert!(!requests.request1.is_empty());
         assert!(!requests.request2.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_size() -> Result<(), PirError> {
+        let mut client = PirClient::new(100)?;
+        
+        assert!(client.update_size(200).is_ok());
+        
+        let indices = vec![150];
+        let requests = client.generate_requests(&indices)?;
+        assert!(!requests.request1.is_empty());
+        assert!(!requests.request2.is_empty());
+        
+        assert!(matches!(
+            client.update_size(-1),
+            Err(PirError::InvalidArgument)
+        ));
+        
         Ok(())
     }
 
