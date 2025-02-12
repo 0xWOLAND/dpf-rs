@@ -1,4 +1,18 @@
+# dpf-rs
+
+A Bazel-based implementation of Private Information Retrieval (PIR) client and server.
+
+> [!WARNING]
+> There are currently known build issues on macOS. We haven't found a reliable fix for these issues yet. If you discover a solution, please feel free to contribute it.
+
+## Building
+
+To build all targets:
 ```shell
-bazel build //... 
+bazel build //...
+```
+
+To run all tests:
+```shell
 bazel test //...
 ```
