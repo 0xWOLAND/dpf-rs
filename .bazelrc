@@ -1,2 +1,0 @@
-# build --cxxopt="-std=c++17" --copt="-w" --experimental_isolated_extension_usages --macos_minimum_os=15.0
-build --copt -fPIC 

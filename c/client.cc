@@ -1,8 +1,8 @@
 #include "client.h"
-#include "external/google_dpf/pir/private_information_retrieval.pb.h"
-#include "external/google_dpf/pir/prng/aes_128_ctr_seeded_prng.h"
-#include "external/google_dpf/pir/dense_dpf_pir_client.h"
-#include "external/google_dpf/dpf/distributed_point_function.h"
+#include "pir/private_information_retrieval.pb.h"
+#include "pir/prng/aes_128_ctr_seeded_prng.h"
+#include "pir/dense_dpf_pir_client.h"
+#include "dpf/distributed_point_function.h"
 #include "nlohmann/json.hpp"
 #include "base64_utils.h"
 
