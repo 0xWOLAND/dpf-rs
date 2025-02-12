@@ -5,9 +5,9 @@ cc_library(
     srcs = ["server.cc"],
     hdrs = ["server.h", "base64_utils.h", "status.h"],
     deps = [
-        "@google_dpf//pir:private_information_retrieval_cc_proto",
-        "@google_dpf//pir:dense_dpf_pir_database",
-        "@google_dpf//pir:dense_dpf_pir_server",
+        "@distributed_point_functions//pir:private_information_retrieval_cc_proto",
+        "@distributed_point_functions//pir:dense_dpf_pir_database",
+        "@distributed_point_functions//pir:dense_dpf_pir_server",
         "@nlohmann_json//:json",
     ],
 )
@@ -17,8 +17,8 @@ cc_library(
     srcs = ["client.cc"],
     hdrs = ["client.h", "base64_utils.h", "status.h"],
     deps = [
-        "@google_dpf//pir:private_information_retrieval_cc_proto",
-        "@google_dpf//pir:dense_dpf_pir_client",
+        "@distributed_point_functions//pir:private_information_retrieval_cc_proto",
+        "@distributed_point_functions//pir:dense_dpf_pir_client",
         "@nlohmann_json//:json",
     ],
 )
@@ -36,7 +36,7 @@ cc_test(
         ":dpf_server",
         ":dpf_client",
         ":base64_utils",
-        "@com_google_googletest//:gtest_main",
+        "@googletest//:gtest_main",
         "@nlohmann_json//:json",
     ],
 )
