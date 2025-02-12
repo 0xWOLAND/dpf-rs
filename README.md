@@ -5,6 +5,9 @@ A Bazel-based implementation of Private Information Retrieval (PIR) client and s
 > [!WARNING]
 > There are currently known build issues on macOS. We haven't found a reliable fix for these issues yet. If you discover a solution, please feel free to contribute it.
 
+## Requirements:
+- Bazel 8.0.1
+
 ## Building
 
 To build all targets:
