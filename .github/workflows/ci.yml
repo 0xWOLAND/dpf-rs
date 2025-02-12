@@ -1,4 +1,4 @@
-name: Bazel Build and Test
+name: CI
 
 on:
   push:
@@ -22,11 +22,6 @@ jobs:
         key: ${{ runner.os }}-bazel-${{ hashFiles('**/MODULE.bazel', '**/WORKSPACE', '**/MODULE.bazel.lock') }}
         restore-keys: |
           ${{ runner.os }}-bazel-
-
-    - name: Install Buildifier
-      run: |
-        go install github.com/bazelbuild/buildtools/buildifier@latest
-        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
     - name: Install Bazelisk
       uses: bazelbuild/setup-bazelisk@v2
