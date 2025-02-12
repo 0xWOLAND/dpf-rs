@@ -1,4 +1,4 @@
-# dpf-rs
+# dpf-rs [![CI](https://github.com/0xWOLAND/dpf-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/0xWOLAND/dpf-rs/actions/workflows/ci.yml)
 
 A Bazel-based implementation of Private Information Retrieval (PIR) client and server.
 
