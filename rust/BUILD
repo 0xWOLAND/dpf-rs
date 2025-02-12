@@ -17,6 +17,7 @@ rust_library(
         "//c:dpf_server",
         "//c:dpf_client",
         "//c:base64_utils",
+        "//cuckoo:cuckoo",
         "@crates//:libc",
         "@crates//:thiserror",
         "@crates//:serde",
