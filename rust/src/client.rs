@@ -123,6 +123,8 @@ impl PirClient {
     }
 }
 
+// client should encrypt before creating the process
+
 impl Drop for PirClient {
     fn drop(&mut self) {
         unsafe {

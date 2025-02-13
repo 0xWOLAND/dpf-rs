@@ -6,21 +6,25 @@ mod test {
         PirError,
     };
 
-    fn setup_servers(initial_elements: usize) -> (PirClient, PirServer<String>, PirServer<String>) {
-        let elements: Vec<String> = (0..initial_elements).map(|i| format!("Element{}", i)).collect();
-        let client = PirClient::new(elements.len() as i32).unwrap();
-        let server1 = PirServer::new(&elements).unwrap();
-        let server2 = PirServer::new(&elements).unwrap();
+    fn setup_servers(capacity: usize) -> (PirClient, PirServer<String>, PirServer<String>) {
+        let default_value = String::from("");
+        let client = PirClient::new(capacity as i32).unwrap();
+        let mut server1 = PirServer::new(capacity, &default_value).unwrap();
+        let mut server2 = PirServer::new(capacity, &default_value).unwrap();
+
+        // Initialize with test data
+        let elements: Vec<(usize, String)> = (0..capacity)
+            .map(|i| (i, format!("Element{}", i)))
+            .collect();
+        server1.batch_write(&elements).unwrap();
+        server2.batch_write(&elements).unwrap();
+
         (client, server1, server2)
     }
 
     #[test]
     fn test_single_element_query() -> Result<(), PirError> {
-        let elements: Vec<String> = (0..4).map(|i| format!("Element{}", i)).collect();
-        
-        let client = PirClient::new(elements.len() as i32)?;
-        let server1 = PirServer::new(&elements)?;
-        let server2 = PirServer::new(&elements)?;
+        let (client, server1, server2) = setup_servers(4);
         
         let indices = vec![1];
         let Request { request1, request2 } = client.generate_requests(&indices)?;
@@ -70,16 +74,13 @@ mod test {
 
     #[test]
     fn test_server_write() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
+        let (client, mut server1, mut server2) = setup_servers(5);
 
-        // Update client size for the new element
-        client.update_size(5)?;
+        // Write a new element at index 4
+        server1.write(4, "NewElement".to_string())?;
+        server2.write(4, "NewElement".to_string())?;
 
-        // Add a new element to both servers
-        server1.write("NewElement".to_string())?;
-        server2.write("NewElement".to_string())?;
-
-        // Query for the newly added element
+        // Query for the newly written element
         let Request { request1, request2 } = client.generate_requests(&[4])?;
         let response1 = server1.process_request(&request1)?;
         let response2 = server2.process_request(&request2)?;
@@ -93,17 +94,17 @@ mod test {
 
     #[test]
     fn test_server_batch_write() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
+        let (client, mut server1, mut server2) = setup_servers(6);
 
-        // Update client size for the new elements
-        client.update_size(6)?;
+        // Write multiple elements at specific indices
+        let updates = vec![
+            (4, "NewElement1".to_string()),
+            (5, "NewElement2".to_string())
+        ];
+        server1.batch_write(&updates)?;
+        server2.batch_write(&updates)?;
 
-        // Add multiple new elements to both servers
-        let new_elements = vec!["NewElement1".to_string(), "NewElement2".to_string()];
-        server1.batch_write(&new_elements)?;
-        server2.batch_write(&new_elements)?;
-
-        // Query for both newly added elements
+        // Query for both newly written elements
         let indices = vec![4, 5];
         let Request { request1, request2 } = client.generate_requests(&indices)?;
         let response1 = server1.process_request(&request1)?;
@@ -118,7 +119,7 @@ mod test {
 
     #[test]
     fn test_write_then_query() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
+        let (client, mut server1, mut server2) = setup_servers(5);
 
         // First query original element
         let Request { request1, request2 } = client.generate_requests(&[1])?;
@@ -127,10 +128,9 @@ mod test {
         let initial_response = client.process_responses(Response { response1, response2 })?;
         assert_eq!(initial_response, "Element1");
 
-        // Update client size and write new element
-        client.update_size(5)?;
-        server1.write("NewElement".to_string())?;
-        server2.write("NewElement".to_string())?;
+        // Write new element at index 4
+        server1.write(4, "NewElement".to_string())?;
+        server2.write(4, "NewElement".to_string())?;
 
         let Request { request1, request2 } = client.generate_requests(&[4])?;
         let response1 = server1.process_request(&request1)?;
@@ -142,49 +142,31 @@ mod test {
     }
 
     #[test]
-    fn test_update_size() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
-        
-        // Test that current size works
-        let Request { request1, request2 } = client.generate_requests(&[1])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(response, "Element1");
-
-        // Update to larger size
-        client.update_size(8)?;
-        
-        // Write new elements
-        server1.write("NewElement1".to_string())?;
-        server2.write("NewElement1".to_string())?;
-        
-        // Test querying new index works
-        let Request { request1, request2 } = client.generate_requests(&[4])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(response, "NewElement1");
-
-        // Test invalid size update
+    fn test_error_handling() {
+        // Test invalid capacity
+        let default_value = String::from("");
         assert!(matches!(
-            client.update_size(-1),
+            PirServer::new(0, &default_value),
             Err(PirError::InvalidArgument)
         ));
         
-        Ok(())
-    }
+        let (_, mut server1, _) = setup_servers(4);
+        
+        // Test out of bounds write
+        assert!(matches!(
+            server1.write(10, "OutOfBounds".to_string()),
+            Err(PirError::IndexOutOfBounds)
+        ));
+        
+        // Test out of bounds batch write
+        assert!(matches!(
+            server1.batch_write(&[(5, "OutOfBounds".to_string())]),
+            Err(PirError::IndexOutOfBounds)
+        ));
 
-    #[test]
-    fn test_error_handling() {
+        // Test client error cases
         assert!(matches!(
             PirClient::new(-1),
-            Err(PirError::InvalidArgument)
-        ));
-        
-        let empty_elements: Vec<String> = vec![];
-        assert!(matches!(
-            PirServer::new(&empty_elements),
             Err(PirError::InvalidArgument)
         ));
         

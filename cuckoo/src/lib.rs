@@ -282,6 +282,7 @@ mod tests {
     #[test]
     fn test_basic() {
         let mut table = create_test_table(10, 2);
+        println!("table.data.len()={}", table.data.len());
         assert_eq!(0, table.index.iter().filter(|loc| loc.filled).count());
 
         // Test with invalid data size

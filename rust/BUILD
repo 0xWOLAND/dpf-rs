@@ -22,6 +22,8 @@ rust_library(
         "@crates//:thiserror",
         "@crates//:serde",
         "@crates//:serde_json",
+        "@crates//:base64",
+        "@crates//:rand",
     ],
 )
 
