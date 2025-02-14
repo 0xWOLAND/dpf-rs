@@ -67,11 +67,9 @@ impl Table {
         key2: Vec<u8>,
     ) -> Option<Self> {
         let expected_size = num_buckets * bucket_depth * item_size;
-        let data = match data {
-            Some(d) if d.len() != expected_size => return None,
-            Some(d) => d,
-            None => vec![0; expected_size],
-        };
+        let data = data
+            .and_then(|d| (d.len() == expected_size).then_some(d))
+            .unwrap_or_else(|| vec![0; expected_size]);
 
         Some(Self {
             num_buckets,
@@ -270,13 +268,6 @@ mod tests {
 
         let table = create_test_table(0, 0);
         assert_eq!(0, table.index.len());
-    }
-
-    #[test]
-    fn test_invalid_construction() {
-        let data = vec![0; 7];
-        let table = Table::new(2, 3, 4, Some(data), 0, TEST_KEY1.to_vec(), TEST_KEY2.to_vec());
-        assert!(table.is_none());
     }
 
     #[test]

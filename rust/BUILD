@@ -10,6 +10,8 @@ rust_library(
         "src/client.rs",
         "src/server.rs",
         "src/error.rs",
+        "src/constants.rs",
+        "src/utils.rs",
         "src/types.rs",
     ],
     edition = "2021",
@@ -37,5 +39,9 @@ rust_test(
     name = "dpf_integration_test",
     srcs = ["tests/integration_test.rs"],
     edition = "2021",
-    deps = [":dpf-rs"],
+    deps = [
+        ":dpf-rs",
+        "@crates//:rand",
+        "@crates//:base64",
+    ],
 )
