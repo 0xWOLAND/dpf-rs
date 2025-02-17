@@ -44,7 +44,7 @@ mod test {
             response2 
         })?;
         
-        assert_eq!(final_response, "Element1");
+        assert_eq!(String::from_utf8(final_response).unwrap(), "Element1");
         Ok(())
     }
 
@@ -69,7 +69,7 @@ mod test {
             response2 
         })?;
         
-        assert_eq!(final_response, "Element0, Element2");
+        assert_eq!(String::from_utf8(final_response).unwrap(), "Element0, Element2");
         Ok(())
     }
 
@@ -87,7 +87,7 @@ mod test {
         let response2 = server2.process_request(&request2)?;
         let final_response = client.process_responses(Response { response1, response2 })?;
         
-        assert_eq!(final_response, "NewElement");
+        assert_eq!(String::from_utf8(final_response).unwrap(), "NewElement");
         assert_eq!(server1.get_elements().len(), 5);
         assert_eq!(server2.get_elements().len(), 5);
         Ok(())
@@ -112,7 +112,7 @@ mod test {
         let response2 = server2.process_request(&request2)?;
         let final_response = client.process_responses(Response { response1, response2 })?;
         
-        assert_eq!(final_response, "NewElement1, NewElement2");
+        assert_eq!(String::from_utf8(final_response).unwrap(), "NewElement1, NewElement2");
         assert_eq!(server1.get_elements().len(), 6);
         assert_eq!(server2.get_elements().len(), 6);
         Ok(())
@@ -127,7 +127,7 @@ mod test {
         let response1 = server1.process_request(&request1)?;
         let response2 = server2.process_request(&request2)?;
         let initial_response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(initial_response, "Element1");
+        assert_eq!(String::from_utf8(initial_response).unwrap(), "Element1");
 
         // Write new element at index 4
         server1.write(4, "NewElement".to_string())?;
@@ -137,7 +137,7 @@ mod test {
         let response1 = server1.process_request(&request1)?;
         let response2 = server2.process_request(&request2)?;
         let final_response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(final_response, "NewElement");
+        assert_eq!(String::from_utf8(final_response).unwrap(), "NewElement");
 
         Ok(())
     }
@@ -229,7 +229,7 @@ mod test {
         // Get responses from servers
         let response1 = server1.get(&request1)?;
         let response2 = server2.get(&request2)?;
-        
+
         // Process responses
         let final_response = client.process_responses(Response {
             response1,
@@ -237,7 +237,7 @@ mod test {
         })?;
 
         // Convert final response string back to bytes for comparison
-        let final_bytes = final_response.as_bytes().to_vec();
+        let final_bytes = final_response.to_vec();
         
         println!("final bytes: {:?}", final_bytes);
         // println!("initial bytes: {:?}", new_element);

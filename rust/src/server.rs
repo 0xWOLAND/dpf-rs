@@ -3,6 +3,7 @@ use libc::{c_char, c_int, c_void};
 use rand::{thread_rng, Rng};
 use std::ffi::{CStr, CString};
 use std::ptr;
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use crate::{
     constants::{BUCKET_DEPTH, RANDOM_SEED},
@@ -229,8 +230,9 @@ impl Server {
         let updates: Vec<(usize, String)> = (0..self.table.num_buckets)
             .map(|bucket_idx| {
                 let start = bucket_idx * BUCKET_DEPTH * item_size;
-                let data = &self.table.data[start..start + item_size];
-                (bucket_idx, String::from_utf8_lossy(data).to_string())
+                let data = &self.table.data[start..start + item_size * BUCKET_DEPTH];
+                let encoded = BASE64.encode(data);
+                (bucket_idx, encoded)
             })
             .collect();
 

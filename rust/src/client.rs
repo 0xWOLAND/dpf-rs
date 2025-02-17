@@ -2,6 +2,8 @@ use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::ptr;
 use serde::{Deserialize, Serialize};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
 use crate::error::{PirError, PirStatus};
 
 #[derive(Serialize, Deserialize)]
@@ -95,19 +97,17 @@ impl Client {
         }
     }
 
-    pub fn process_responses(&self, response: Response) -> Result<String, PirError> {
+    pub fn process_responses(&self, response: Response) -> Result<Vec<u8>, PirError> {
         unsafe {
             let responses_json = serde_json::to_string(&response)
                 .map_err(|_| PirError::Processing)?;
             let c_responses = CString::new(responses_json)
                 .map_err(|_| PirError::InvalidArgument)?;
             let mut merged_result = ptr::null_mut();
-
             let result: Result<(), PirError> = pir_client_process_responses(
                 c_responses.as_ptr(), 
                 &mut merged_result
             ).into();
-
             result.and_then(|_| {
                 if merged_result.is_null() {
                     return Err(PirError::FfiError);
@@ -117,7 +117,9 @@ impl Client {
                     .map(String::from)
                     .map_err(|_| PirError::Utf8Error)?;
                 pir_client_free_string(merged_result);
-                Ok(result)
+                // Decode base64 string to bytes
+                BASE64.decode(result)
+                    .map_err(|_| PirError::InvalidArgument)
             })
         }
     }
