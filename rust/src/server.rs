@@ -1,4 +1,3 @@
-use base64::engine::{general_purpose::STANDARD as BASE64, Engine as _};
 use cuckoo::{prf, Item, Table};
 use libc::{c_char, c_int, c_void};
 use rand::{thread_rng, Rng};
@@ -49,8 +48,10 @@ where
                 .iter()
                 .map(|element| {
                     let bytes: Vec<u8> = element.clone().into();
-                    Ok(CString::new(bytes).expect("Cstring failed"))
-                    // CString::new(bytes).map_err(|_| PirError::InvalidArgument)
+                    // Convert bytes to string using utf8_lossy to handle null bytes
+                    let string_value = String::from_utf8_lossy(&bytes).to_string();
+                    // Escape null bytes before creating CString
+                    Ok(CString::new(string_value.replace('\0', "�")).expect("CString failed"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -69,7 +70,7 @@ where
     pub fn write(&mut self, index: usize, element: T) -> Result<(), PirError> {
         self.batch_write(&[(index, element)])
     }
-
+    
     pub fn batch_write(&mut self, updates: &[(usize, T)]) -> Result<(), PirError> {
         for (index, _) in updates {
             if *index >= self.capacity {
@@ -85,7 +86,11 @@ where
                 .iter()
                 .map(|element| {
                     let bytes: Vec<u8> = element.clone().into();
-                    CString::new(bytes).map_err(|_| PirError::InvalidArgument)
+                    // Convert bytes to string using utf8_lossy
+                    let string_value = String::from_utf8_lossy(&bytes).to_string();
+                    // Escape null bytes before creating CString
+                    CString::new(string_value.replace('\0', "�"))
+                        .map_err(|_| PirError::InvalidArgument)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -103,7 +108,6 @@ where
         Ok(())
     }
 
-    // Rest remains the same
     pub fn process_request(&self, request_base64: &str) -> Result<String, PirError> {
         unsafe {
             let c_request = CString::new(request_base64).map_err(|_| PirError::InvalidArgument)?;
@@ -146,7 +150,7 @@ impl<T> Drop for PirServer<T> {
 }
 
 pub struct Server {
-    pir: PirServer<Vec<u8>>,
+    pir: PirServer<String>,
     table: Table,
 }
 
@@ -156,29 +160,24 @@ impl Server {
             return Err(PirError::InvalidArgument);
         }
 
-        let mut rng = thread_rng();
-        let chunk_size = BUCKET_DEPTH * item_size;
-        let rand_chunk = vec![1u8; chunk_size];
-
-        // Initialize empty table
+        // Create empty chunk as zeroed bytes for the table
+        let chunk_bytes = vec![0u8; BUCKET_DEPTH * item_size];
+        
+        // Initialize empty table with raw bytes
         let table = Table::new(
             capacity,
             BUCKET_DEPTH,
             item_size,
-            Some(
-                vec![rand_chunk.clone(); capacity]
-                    .into_iter()
-                    .flatten()
-                    .collect(),
-            ),
+            Some(vec![chunk_bytes.clone(); capacity].into_iter().flatten().collect()),
             RANDOM_SEED,
             TEST_KEY1.to_vec(),
             TEST_KEY2.to_vec(),
         )
         .ok_or(PirError::InvalidArgument)?;
 
-        // Initialize PIR server with empty chunks
-        let pir = PirServer::new(capacity, &rand_chunk).expect("PIR Server failed here");
+        // Convert bytes to string for PIR server, replacing nulls with placeholder
+        let chunk_str = String::from_utf8_lossy(&chunk_bytes).to_string();
+        let pir = PirServer::new(capacity, &chunk_str)?;
 
         Ok(Self { pir, table })
     }
@@ -198,18 +197,21 @@ impl Server {
             }
         }
 
-        // Insert items into table
+        // Insert items into table using raw bytes
         let mut rng = thread_rng();
         for (index, element) in updates {
             let seq_no = rng.gen::<u64>();
             let bucket1 = prf(&self.table.key1, seq_no).unwrap() % self.table.num_buckets;
             let bucket2 = prf(&self.table.key2, seq_no).unwrap() % self.table.num_buckets;
-            let item = Item::new(rng.gen::<u64>(), element.clone(), seq_no, bucket1, bucket2);
-            if self
-                .table
-                .insert(&item)
-                .is_err()
-            {
+            
+            let item = Item::new(
+                rng.gen::<u64>(),
+                element.clone(),
+                seq_no,
+                bucket1,
+                bucket2
+            );
+            if self.table.insert(&item).is_err() {
                 return Err(PirError::TableFull);
             }
         }
@@ -217,26 +219,27 @@ impl Server {
         self.update_pir_data()
     }
 
-    pub fn get(&self, request_base64: &str) -> Result<String, PirError> {
+    pub fn get(&self, request_base64: &String) -> Result<String, PirError> {
         self.pir.process_request(request_base64)
     }
 
     fn update_pir_data(&mut self) -> Result<(), PirError> {
-        let chunk_size = self.table.data.len() / self.table.num_buckets;
+        let item_size = self.table.item_size;
 
-        let updates: Vec<(usize, Vec<u8>)> = self
-            .table
-            .data
-            .chunks_exact(chunk_size)
-            .enumerate()
-            .map(|(index, chunk)| (index, chunk.to_vec()))
+        let updates: Vec<(usize, String)> = (0..self.table.num_buckets)
+            .map(|bucket_idx| {
+                let start = bucket_idx * BUCKET_DEPTH * item_size;
+                let data = &self.table.data[start..start + item_size];
+                (bucket_idx, String::from_utf8_lossy(data).to_string())
+            })
             .collect();
 
         self.pir.batch_write(&updates)
     }
+    
 
     pub fn capacity(&self) -> usize {
-        self.table.num_buckets
+        self.pir.capacity()
     }
 }
 
@@ -258,13 +261,14 @@ mod tests {
     fn test_pir_server_creation() {
         let default_value = vec![1u8; TEST_ITEM_SIZE];
         let capacity = 3;
-        let server = PirServer::new(capacity, &default_value);
+        let default_str = String::from_utf8_lossy(&default_value).to_string();
+        let server = PirServer::new(capacity, &default_str);
         assert!(server.is_ok());
         if let Ok(server) = server {
             assert_eq!(server.capacity(), capacity);
             assert_eq!(server.get_elements().len(), capacity);
         }
-        let server = PirServer::new(0, &default_value);
+        let server = PirServer::new(0, &default_str);
         assert!(matches!(server, Err(PirError::InvalidArgument)));
     }
 
@@ -335,5 +339,35 @@ mod tests {
             server.batch_write(&invalid_updates),
             Err(PirError::InvalidArgument)
         ));
+    }
+
+    #[test]
+    fn test_byte_data_preservation() {
+        let mut server = Server::new(TEST_CAPACITY, TEST_ITEM_SIZE).unwrap();
+        
+        // Test with specific byte patterns
+        let test_patterns = vec![
+            vec![0u8; TEST_ITEM_SIZE],                    // All zeros
+            vec![255u8; TEST_ITEM_SIZE],                  // All max bytes
+            (0..TEST_ITEM_SIZE as u8).collect(),          // Sequential bytes
+            create_test_data(TEST_ITEM_SIZE),             // Random bytes
+        ];
+
+        for (i, pattern) in test_patterns.iter().enumerate() {
+            assert!(server.write(i, pattern.clone()).is_ok());
+        }
+    }
+
+    #[test]
+    fn test_null_byte_handling() {
+        let mut server = Server::new(TEST_CAPACITY, TEST_ITEM_SIZE).unwrap();
+        
+        // Create test data with explicit null bytes
+        let mut data = vec![1u8; TEST_ITEM_SIZE];
+        data[0] = 0;  // First byte null
+        data[TEST_ITEM_SIZE/2] = 0;  // Middle byte null
+        data[TEST_ITEM_SIZE-1] = 0;  // Last byte null
+        
+        assert!(server.write(0, data).is_ok());
     }
 }
