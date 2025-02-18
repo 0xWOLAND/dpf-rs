@@ -21,6 +21,10 @@ pub enum PirError {
     Utf8Error,
     #[error("Foreign function interface error")]
     FfiError,
+    #[error("Cuckoo Table is full")]
+    TableFull,
+    #[error("Index out of bounds")]
+    IndexOutOfBounds,
 }
 
 impl From<PirStatus> for Result<(), PirError> {

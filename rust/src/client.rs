@@ -2,6 +2,8 @@ use libc::{c_char, c_int, c_void};
 use std::ffi::{CStr, CString};
 use std::ptr;
 use serde::{Deserialize, Serialize};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
 use crate::error::{PirError, PirStatus};
 
 #[derive(Serialize, Deserialize)]
@@ -36,11 +38,11 @@ extern "C" {
     fn pir_client_destroy(client_handle: *mut c_void);
 }
 
-pub struct PirClient {
+pub struct Client {
     handle: *mut c_void,
 }
 
-impl PirClient {
+impl Client {
     pub fn new(database_size: i32) -> Result<Self, PirError> {
         if database_size <= 0 {
             return Err(PirError::InvalidArgument);
@@ -58,7 +60,7 @@ impl PirClient {
             return Err(PirError::InvalidArgument);
         }
 
-        let new_client = PirClient::new(new_size)?;
+        let new_client = Client::new(new_size)?;
         
         unsafe {
             if !self.handle.is_null() {
@@ -95,19 +97,17 @@ impl PirClient {
         }
     }
 
-    pub fn process_responses(&self, response: Response) -> Result<String, PirError> {
+    pub fn _process_responses(&self, response: Response) -> Result<String, PirError> {
         unsafe {
             let responses_json = serde_json::to_string(&response)
                 .map_err(|_| PirError::Processing)?;
             let c_responses = CString::new(responses_json)
                 .map_err(|_| PirError::InvalidArgument)?;
             let mut merged_result = ptr::null_mut();
-
             let result: Result<(), PirError> = pir_client_process_responses(
                 c_responses.as_ptr(), 
                 &mut merged_result
             ).into();
-
             result.and_then(|_| {
                 if merged_result.is_null() {
                     return Err(PirError::FfiError);
@@ -121,9 +121,15 @@ impl PirClient {
             })
         }
     }
+
+    pub fn process_responses(&self, response: Response) -> Result<Vec<u8>, PirError> {
+        self._process_responses(response)
+            .map(|result| BASE64.decode(result).unwrap())
+            .map_err(|_| PirError::Processing)
+    }
 }
 
-impl Drop for PirClient {
+impl Drop for Client {
     fn drop(&mut self) {
         unsafe {
             if !self.handle.is_null() {
@@ -139,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_pir_client_lifecycle() -> Result<(), PirError> {
-        let client = PirClient::new(100)?;
+        let client = Client::new(100)?;
         let indices = vec![1, 2, 3];
         let requests = client.generate_requests(&indices)?;
         assert!(!requests.request1.is_empty());
@@ -149,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_update_size() -> Result<(), PirError> {
-        let mut client = PirClient::new(100)?;
+        let mut client = Client::new(100)?;
         
         assert!(client.update_size(200).is_ok());
         
@@ -169,7 +175,7 @@ mod tests {
     #[test]
     fn test_error_handling() {
         assert!(matches!(
-            PirClient::new(-1),
+            Client::new(-1),
             Err(PirError::InvalidArgument)
         ));
     }
