@@ -97,7 +97,7 @@ impl Client {
         }
     }
 
-    pub fn process_responses(&self, response: Response) -> Result<Vec<u8>, PirError> {
+    pub fn _process_responses(&self, response: Response) -> Result<String, PirError> {
         unsafe {
             let responses_json = serde_json::to_string(&response)
                 .map_err(|_| PirError::Processing)?;
@@ -117,15 +117,17 @@ impl Client {
                     .map(String::from)
                     .map_err(|_| PirError::Utf8Error)?;
                 pir_client_free_string(merged_result);
-                // Decode base64 string to bytes
-                BASE64.decode(result)
-                    .map_err(|_| PirError::InvalidArgument)
+                Ok(result)
             })
         }
     }
-}
 
-// client should encrypt before creating the process
+    pub fn process_responses(&self, response: Response) -> Result<Vec<u8>, PirError> {
+        self._process_responses(response)
+            .map(|result| BASE64.decode(result).unwrap())
+            .map_err(|_| PirError::Processing)
+    }
+}
 
 impl Drop for Client {
     fn drop(&mut self) {

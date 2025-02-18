@@ -35,9 +35,10 @@ pub struct PirServer<T> {
     capacity: usize,
 }
 
+
 impl<T> PirServer<T>
 where
-    T: Into<Vec<u8>> + Clone + Default,
+    T: Into<Vec<u8>> + Clone + Default 
 {
     pub fn new(capacity: usize, default_value: &T) -> Result<Self, PirError> {
         if capacity == 0 {
@@ -48,14 +49,11 @@ where
             let c_strings: Vec<CString> = elements
                 .iter()
                 .map(|element| {
-                    let bytes: Vec<u8> = element.clone().into();
-                    // Convert bytes to string using utf8_lossy to handle null bytes
-                    let string_value = String::from_utf8_lossy(&bytes).to_string();
-                    // Escape null bytes before creating CString
-                    Ok(CString::new(string_value.replace('\0', "�")).expect("CString failed"))
+                    CString::new(BASE64.encode(element.clone().into()))
+                        .map_err(|_| PirError::InvalidArgument)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-
+    
             let c_ptrs: Vec<*const c_char> = c_strings.iter().map(|cs| cs.as_ptr()).collect();
             let mut handle = ptr::null_mut();
             let result: Result<(), PirError> =
@@ -225,12 +223,13 @@ impl Server {
     }
 
     fn update_pir_data(&mut self) -> Result<(), PirError> {
-        let item_size = self.table.item_size;
-
+        let bucket_size = BUCKET_DEPTH * self.table.item_size;
+        
+        // Each update contains the entire bucket's data
         let updates: Vec<(usize, String)> = (0..self.table.num_buckets)
             .map(|bucket_idx| {
-                let start = bucket_idx * BUCKET_DEPTH * item_size;
-                let data = &self.table.data[start..start + item_size * BUCKET_DEPTH];
+                let start = bucket_idx * bucket_size;
+                let data = &self.table.data[start..start + bucket_size];
                 let encoded = BASE64.encode(data);
                 (bucket_idx, encoded)
             })

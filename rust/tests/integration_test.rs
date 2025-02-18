@@ -6,6 +6,7 @@ mod test {
         server::{Server, PirServer},
         PirError,
     };
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
     fn setup_servers(capacity: usize) -> (Client, PirServer<String>, PirServer<String>) {
         let default_value = String::from("");
@@ -39,12 +40,12 @@ mod test {
         assert!(!response1.is_empty());
         assert!(!response2.is_empty());
         
-        let final_response = client.process_responses(Response { 
+        let final_response = client._process_responses(Response { 
             response1, 
             response2 
         })?;
         
-        assert_eq!(String::from_utf8(final_response).unwrap(), "Element1");
+        assert_eq!(final_response, "Element1");
         Ok(())
     }
 
@@ -64,12 +65,12 @@ mod test {
         assert!(!response1.is_empty());
         assert!(!response2.is_empty());
         
-        let final_response = client.process_responses(Response { 
+        let final_response = client._process_responses(Response { 
             response1, 
             response2 
         })?;
         
-        assert_eq!(String::from_utf8(final_response).unwrap(), "Element0, Element2");
+        assert_eq!(final_response, "Element0, Element2");
         Ok(())
     }
 
@@ -85,9 +86,9 @@ mod test {
         let Request { request1, request2 } = client.generate_requests(&[4])?;
         let response1 = server1.process_request(&request1)?;
         let response2 = server2.process_request(&request2)?;
-        let final_response = client.process_responses(Response { response1, response2 })?;
+        let final_response = client._process_responses(Response { response1, response2 })?;
         
-        assert_eq!(String::from_utf8(final_response).unwrap(), "NewElement");
+        assert_eq!(final_response, "NewElement");
         assert_eq!(server1.get_elements().len(), 5);
         assert_eq!(server2.get_elements().len(), 5);
         Ok(())
@@ -110,9 +111,9 @@ mod test {
         let Request { request1, request2 } = client.generate_requests(&indices)?;
         let response1 = server1.process_request(&request1)?;
         let response2 = server2.process_request(&request2)?;
-        let final_response = client.process_responses(Response { response1, response2 })?;
+        let final_response = client._process_responses(Response { response1, response2 })?;
         
-        assert_eq!(String::from_utf8(final_response).unwrap(), "NewElement1, NewElement2");
+        assert_eq!(final_response, "NewElement1, NewElement2");
         assert_eq!(server1.get_elements().len(), 6);
         assert_eq!(server2.get_elements().len(), 6);
         Ok(())
@@ -126,8 +127,8 @@ mod test {
         let Request { request1, request2 } = client.generate_requests(&[1])?;
         let response1 = server1.process_request(&request1)?;
         let response2 = server2.process_request(&request2)?;
-        let initial_response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(String::from_utf8(initial_response).unwrap(), "Element1");
+        let initial_response = client._process_responses(Response { response1, response2 })?;
+        assert_eq!(initial_response, "Element1");
 
         // Write new element at index 4
         server1.write(4, "NewElement".to_string())?;
@@ -136,8 +137,8 @@ mod test {
         let Request { request1, request2 } = client.generate_requests(&[4])?;
         let response1 = server1.process_request(&request1)?;
         let response2 = server2.process_request(&request2)?;
-        let final_response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(String::from_utf8(final_response).unwrap(), "NewElement");
+        let final_response = client._process_responses(Response { response1, response2 })?;
+        assert_eq!(final_response, "NewElement");
 
         Ok(())
     }
@@ -237,10 +238,8 @@ mod test {
         })?;
 
         // Convert final response string back to bytes for comparison
-        let final_bytes = final_response.to_vec();
-        
-        println!("final bytes: {:?}", final_bytes);
-        // println!("initial bytes: {:?}", new_element);
+        println!("final response: {:?}", final_response);
+        println!("initial bytes: {:?}", new_element);
 
         assert!(1 < 0);
 
