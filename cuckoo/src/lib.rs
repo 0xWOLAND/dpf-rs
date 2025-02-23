@@ -5,7 +5,6 @@ use thiserror::Error;
 
 const MAX_EVICTIONS: usize = 500;
 type HmacSha256 = Hmac<Sha256>;
-const RANDOM_SEED: u64 = 12345;
 
 pub fn prf(key: &[u8], seq_no: u64) -> Result<usize, Error> {
     let mut mac = HmacSha256::new_from_slice(key)
@@ -227,11 +226,11 @@ impl PartialEq for Item {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::prelude::*;
 
     const TEST_ITEM_SIZE: usize = 64;
     const TEST_KEY1: &[u8] = b"test_key_1_for_prf_computation";
     const TEST_KEY2: &[u8] = b"test_key_2_for_prf_computation";
+    const RANDOM_SEED: u64 = 12345;
 
     fn get_bytes(val: &str) -> Vec<u8> {
         let mut buf = vec![0; TEST_ITEM_SIZE];

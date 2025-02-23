@@ -14,7 +14,6 @@ mod test {
         let mut server1 = PirServer::new(capacity, &default_value).unwrap();
         let mut server2 = PirServer::new(capacity, &default_value).unwrap();
 
-        // Initialize with test data
         let elements: Vec<(usize, String)> = (0..capacity)
             .map(|i| (i, format!("Element{}", i)))
             .collect();
@@ -221,8 +220,8 @@ mod test {
 
         // Convert to string and write to servers
         let new_element_str = new_element.clone();
-        server1.write(0, new_element_str.clone())?;
-        server2.write(0, new_element_str.clone())?;
+        server1.write(0, new_element_str.clone(), 1)?;
+        server2.write(0, new_element_str.clone(), 1)?;
 
         // Create PIR request for index 0
         let Request { request1, request2 } = client.generate_requests(&[0])?;

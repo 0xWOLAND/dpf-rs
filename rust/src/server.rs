@@ -181,13 +181,13 @@ impl Server {
         Ok(Self { pir, table })
     }
 
-    pub fn write(&mut self, index: usize, element: Vec<u8>) -> Result<(), PirError> {
-        self.batch_write(&[(index, element)])
+    pub fn write(&mut self, index: usize, element: Vec<u8>, seq_no: u64) -> Result<(), PirError> {
+        self.batch_write(&[(index, element, seq_no)])
     }
 
-    pub fn batch_write(&mut self, updates: &[(usize, Vec<u8>)]) -> Result<(), PirError> {
+    pub fn batch_write(&mut self, updates: &[(usize, Vec<u8>, u64)]) -> Result<(), PirError> {
         // Validate updates
-        for (index, element) in updates {
+        for (index, element, seq_no) in updates {
             if *index >= self.table.num_buckets {
                 return Err(PirError::IndexOutOfBounds);
             }
@@ -196,17 +196,15 @@ impl Server {
             }
         }
 
-        // Insert items into table using raw bytes
         let mut rng = thread_rng();
-        for (index, element) in updates {
-            let seq_no = rng.gen::<u64>();
-            let bucket1 = prf(&self.table.key1, seq_no).unwrap() % self.table.num_buckets;
-            let bucket2 = prf(&self.table.key2, seq_no).unwrap() % self.table.num_buckets;
+        for (index, element, seq_no) in updates {
+            let bucket1 = prf(&self.table.key1, *seq_no).unwrap() % self.table.num_buckets;
+            let bucket2 = prf(&self.table.key2, *seq_no).unwrap() % self.table.num_buckets;
             
             let item = Item::new(
                 rng.gen::<u64>(),
                 element.clone(),
-                seq_no,
+                *seq_no,
                 bucket1,
                 bucket2
             );
@@ -293,19 +291,19 @@ mod tests {
 
         // Test writing valid element at valid index
         let new_element = create_test_data(TEST_ITEM_SIZE);
-        assert!(server.write(0, new_element).is_ok());
+        assert!(server.write(0, new_element, 1).is_ok());
 
         // Test writing element with wrong size
         let invalid_element = create_test_data(TEST_ITEM_SIZE - 1);
         assert!(matches!(
-            server.write(0, invalid_element),
+            server.write(0, invalid_element, 2),
             Err(PirError::InvalidArgument)
         ));
 
         // Test writing at invalid index
         let element = create_test_data(TEST_ITEM_SIZE);
         assert!(matches!(
-            server.write(TEST_CAPACITY, element),
+            server.write(TEST_CAPACITY, element, 3),
             Err(PirError::IndexOutOfBounds)
         ));
     }
@@ -316,15 +314,15 @@ mod tests {
 
         // Test valid batch write
         let updates = vec![
-            (0, create_test_data(TEST_ITEM_SIZE)),
-            (2, create_test_data(TEST_ITEM_SIZE)),
+            (0, create_test_data(TEST_ITEM_SIZE), 1),
+            (2, create_test_data(TEST_ITEM_SIZE), 2),
         ];
         assert!(server.batch_write(&updates).is_ok());
 
         // Test batch write with invalid index
         let invalid_updates = vec![
-            (0, create_test_data(TEST_ITEM_SIZE)),
-            (TEST_CAPACITY, create_test_data(TEST_ITEM_SIZE)), // Invalid index
+            (0, create_test_data(TEST_ITEM_SIZE), 3),
+            (TEST_CAPACITY, create_test_data(TEST_ITEM_SIZE), 4), // Invalid index
         ];
         assert!(matches!(
             server.batch_write(&invalid_updates),
@@ -333,8 +331,8 @@ mod tests {
 
         // Test batch write with invalid size
         let invalid_updates = vec![
-            (0, create_test_data(TEST_ITEM_SIZE)),
-            (1, create_test_data(TEST_ITEM_SIZE - 1)), // Invalid size
+            (0, create_test_data(TEST_ITEM_SIZE), 5),
+            (1, create_test_data(TEST_ITEM_SIZE - 1), 6), // Invalid size
         ];
         assert!(matches!(
             server.batch_write(&invalid_updates),
@@ -355,7 +353,7 @@ mod tests {
         ];
 
         for (i, pattern) in test_patterns.iter().enumerate() {
-            assert!(server.write(i, pattern.clone()).is_ok());
+            assert!(server.write(i, pattern.clone(), i as u64).is_ok());
         }
     }
 
@@ -369,6 +367,6 @@ mod tests {
         data[TEST_ITEM_SIZE/2] = 0;  // Middle byte null
         data[TEST_ITEM_SIZE-1] = 0;  // Last byte null
         
-        assert!(server.write(0, data).is_ok());
+        assert!(server.write(0, data, 1).is_ok());
     }
 }
