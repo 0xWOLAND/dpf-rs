@@ -27,6 +27,21 @@ pub enum PirError {
     IndexOutOfBounds,
 }
 
+#[derive(Error, Debug)]
+pub enum CryptoError {
+    #[error("Invalid key length - must be exactly 16 bytes")]
+    InvalidKeyLength,
+    #[error("HKDF expansion failed")]
+    HkdfExpansionFailed,
+    #[error("HKDF fill failed")]
+    HkdfFillFailed,
+    #[error("Encryption failed")]
+    EncryptionFailed,
+    #[error("Decryption failed")]
+    DecryptionFailed,
+}
+
+
 impl From<PirStatus> for Result<(), PirError> {
     fn from(status: PirStatus) -> Self {
         match status {

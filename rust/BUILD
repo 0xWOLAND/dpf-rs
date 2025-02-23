@@ -26,6 +26,8 @@ rust_library(
         "@crates//:serde_json",
         "@crates//:base64",
         "@crates//:rand",
+        "@crates//:aes-gcm",
+        "@crates//:ring",
     ],
 )
 

@@ -241,8 +241,6 @@ mod test {
         println!("final response: {:?}", final_response);
         println!("initial bytes: {:?}", new_element);
 
-        assert!(1 < 0);
-
         Ok(())
     }
 }

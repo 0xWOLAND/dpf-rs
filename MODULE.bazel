@@ -47,5 +47,17 @@ crate.spec(
     version = "0.10",
 )
 
+# Crypto Dependencies
+
+crate.spec(
+    package = "aes-gcm",
+    version = "0.10.3",
+)
+
+crate.spec(
+    package = "ring",
+    version = "0.17.8",
+)
+
 crate.from_specs()
 use_repo(crate, "crates")
