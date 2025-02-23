@@ -1,6 +1,6 @@
 use cuckoo::{prf, Item, Table};
 use libc::{c_char, c_int, c_void};
-use rand::{thread_rng, Rng};
+use rand::{thread_rng, Rng, RngCore};
 use std::ffi::{CStr, CString};
 use std::ptr;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -37,11 +37,18 @@ pub struct PirServer {
 
 
 impl PirServer {
-    pub fn new(capacity: usize, default_value: &String) -> Result<Self, PirError> {
+    pub fn new(capacity: usize, item_size: usize) -> Result<Self, PirError> {
         if capacity == 0 {
             return Err(PirError::InvalidArgument);
         }
-        let elements = vec![default_value.clone(); capacity];
+
+        let mut rng = thread_rng();
+        let elements: Vec<String> = (0..capacity).map(|_| {
+            let mut data = vec![0u8; item_size];
+            rng.fill_bytes(&mut data);
+            BASE64.encode(data)
+        }).collect();
+        
         unsafe {
             let c_strings: Vec<CString> = elements
                 .iter()
@@ -50,7 +57,7 @@ impl PirServer {
                         .map_err(|_| PirError::InvalidArgument)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-    
+
             let c_ptrs: Vec<*const c_char> = c_strings.iter().map(|cs| cs.as_ptr()).collect();
             let mut handle = ptr::null_mut();
             let result: Result<(), PirError> =
@@ -81,11 +88,7 @@ impl PirServer {
             let c_strings: Vec<CString> = updated_elements
                 .iter()
                 .map(|element| {
-                    let bytes: Vec<u8> = element.clone().into();
-                    // Convert bytes to string using utf8_lossy
-                    let string_value = String::from_utf8_lossy(&bytes).to_string();
-                    // Escape null bytes before creating CString
-                    CString::new(string_value.replace('\0', ""))
+                    CString::new(element.clone())
                         .map_err(|_| PirError::InvalidArgument)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -156,24 +159,21 @@ impl Server {
             return Err(PirError::InvalidArgument);
         }
 
-        // Create empty chunk as zeroed bytes for the table
-        let chunk_bytes = vec![0u8; BUCKET_DEPTH * item_size];
-        
+        let mut rng = thread_rng();
+        let bytes = (0..(capacity * BUCKET_DEPTH * item_size)).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
+
         // Initialize empty table with raw bytes
         let table = Table::new(
             capacity,
             BUCKET_DEPTH,
             item_size,
-            Some(vec![chunk_bytes.clone(); capacity].into_iter().flatten().collect()),
+            Some(bytes),
             RANDOM_SEED,
             TEST_KEY1.to_vec(),
             TEST_KEY2.to_vec(),
         )
         .ok_or(PirError::InvalidArgument)?;
-
-        // Convert bytes to string for PIR server, replacing nulls with placeholder
-        let chunk_str = String::from_utf8_lossy(&chunk_bytes).to_string();
-        let pir = PirServer::new(capacity, &chunk_str)?;
+        let pir = PirServer::new(capacity, item_size)?;
 
         Ok(Self { pir, table })
     }
@@ -255,16 +255,14 @@ mod tests {
 
     #[test]
     fn test_pir_server_creation() {
-        let default_value = vec![1u8; TEST_ITEM_SIZE];
         let capacity = 3;
-        let default_str = String::from_utf8_lossy(&default_value).to_string();
-        let server = PirServer::new(capacity, &default_str);
+        let server = PirServer::new(capacity, TEST_ITEM_SIZE);
         assert!(server.is_ok());
         if let Ok(server) = server {
             assert_eq!(server.capacity(), capacity);
             assert_eq!(server.get_elements().len(), capacity);
         }
-        let server = PirServer::new(0, &default_str);
+        let server = PirServer::new(0, TEST_ITEM_SIZE);
         assert!(matches!(server, Err(PirError::InvalidArgument)));
     }
 

@@ -8,11 +8,12 @@ mod test {
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
+    const TEST_ITEM_SIZE: usize = 64;
+
     fn setup_servers(capacity: usize) -> (Client, PirServer, PirServer) {
-        let default_value = String::from("");
         let client = Client::new(capacity as i32).unwrap();
-        let mut server1 = PirServer::new(capacity, &default_value).unwrap();
-        let mut server2 = PirServer::new(capacity, &default_value).unwrap();
+        let mut server1 = PirServer::new(capacity, TEST_ITEM_SIZE).unwrap();
+        let mut server2 = PirServer::new(capacity, TEST_ITEM_SIZE).unwrap();
 
         let elements: Vec<(usize, String)> = (0..capacity)
             .map(|i| (i, format!("Element{}", i)))
@@ -145,9 +146,8 @@ mod test {
     #[test]
     fn test_error_handling() {
         // Test invalid capacity
-        let default_value = String::from("");
         assert!(matches!(
-            PirServer::new(0, &default_value),
+            PirServer::new(0, TEST_ITEM_SIZE),
             Err(PirError::InvalidArgument)
         ));
         
@@ -185,8 +185,8 @@ mod test {
         let item_size = 64;
         let initial_elements: Vec<Vec<u8>> = (0..4)
             .map(|_| {
-                let mut data = vec![0u8; item_size];
-                thread_rng().fill_bytes(&mut data);
+                let mut data = vec![b'a'; item_size];
+                // thread_rng().fill_bytes(&mut data);
                 data
             })
             .collect();
