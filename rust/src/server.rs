@@ -29,18 +29,15 @@ extern "C" {
     fn pir_server_destroy(server_handle: *mut c_void);
 }
 
-pub struct PirServer<T> {
+pub struct PirServer {
     handle: *mut c_void,
-    elements: Vec<T>,
+    elements: Vec<String>,
     capacity: usize,
 }
 
 
-impl<T> PirServer<T>
-where
-    T: Into<Vec<u8>> + Clone + Default 
-{
-    pub fn new(capacity: usize, default_value: &T) -> Result<Self, PirError> {
+impl PirServer {
+    pub fn new(capacity: usize, default_value: &String) -> Result<Self, PirError> {
         if capacity == 0 {
             return Err(PirError::InvalidArgument);
         }
@@ -49,7 +46,7 @@ where
             let c_strings: Vec<CString> = elements
                 .iter()
                 .map(|element| {
-                    CString::new(BASE64.encode(element.clone().into()))
+                    CString::new(element.clone())
                         .map_err(|_| PirError::InvalidArgument)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -66,11 +63,11 @@ where
         }
     }
 
-    pub fn write(&mut self, index: usize, element: T) -> Result<(), PirError> {
+    pub fn write(&mut self, index: usize, element: String) -> Result<(), PirError> {
         self.batch_write(&[(index, element)])
     }
     
-    pub fn batch_write(&mut self, updates: &[(usize, T)]) -> Result<(), PirError> {
+    pub fn batch_write(&mut self, updates: &[(usize, String)]) -> Result<(), PirError> {
         for (index, _) in updates {
             if *index >= self.capacity {
                 return Err(PirError::IndexOutOfBounds);
@@ -88,7 +85,7 @@ where
                     // Convert bytes to string using utf8_lossy
                     let string_value = String::from_utf8_lossy(&bytes).to_string();
                     // Escape null bytes before creating CString
-                    CString::new(string_value.replace('\0', "�"))
+                    CString::new(string_value.replace('\0', ""))
                         .map_err(|_| PirError::InvalidArgument)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -129,7 +126,7 @@ where
         }
     }
 
-    pub fn get_elements(&self) -> &[T] {
+    pub fn get_elements(&self) -> &[String] {
         &self.elements
     }
 
@@ -138,7 +135,7 @@ where
     }
 }
 
-impl<T> Drop for PirServer<T> {
+impl Drop for PirServer {
     fn drop(&mut self) {
         unsafe {
             if !self.handle.is_null() {
@@ -149,7 +146,7 @@ impl<T> Drop for PirServer<T> {
 }
 
 pub struct Server {
-    pir: PirServer<String>,
+    pir: PirServer,
     table: Table,
 }
 

@@ -8,7 +8,7 @@ mod test {
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
-    fn setup_servers(capacity: usize) -> (Client, PirServer<String>, PirServer<String>) {
+    fn setup_servers(capacity: usize) -> (Client, PirServer, PirServer) {
         let default_value = String::from("");
         let client = Client::new(capacity as i32).unwrap();
         let mut server1 = PirServer::new(capacity, &default_value).unwrap();
