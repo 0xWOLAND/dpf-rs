@@ -44,8 +44,8 @@ impl PirServer {
 
         let mut rng = thread_rng();
         let elements: Vec<String> = (0..capacity).map(|_| {
-            let mut data = vec![20u8; item_size];
-            // rng.fill_bytes(&mut data);
+            let mut data = vec![0u8; item_size];
+            rng.fill_bytes(&mut data);
             BASE64.encode(data)
         }).collect();
         

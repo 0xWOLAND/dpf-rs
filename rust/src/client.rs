@@ -136,7 +136,6 @@ impl Client {
     pub fn process_responses(&self, response: Response) -> Result<Vec<Vec<u8>>, PirError> {
         self._process_responses(response)
             .map(|result| {
-                println!("result: {:?}", result);
                 result.split(',')
                     .map(|part| BASE64.decode(part.trim()).unwrap())
                     .collect()
