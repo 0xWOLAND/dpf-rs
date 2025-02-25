@@ -5,6 +5,7 @@ use aes_gcm::{Aes128Gcm, Nonce};
 use crate::error::CryptoError;
 use rand::{Rng, thread_rng};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Key(Vec<u8>);
 
 impl Key {

@@ -11,27 +11,28 @@ mod test {
     use cuckoo::prf;
 
     const TEST_ITEM_SIZE: usize = 64;
+    const ITEM_SIZE: usize = 64;
+    const TABLE_SIZE: usize = 10;
 
     #[test]
     fn test_server_write_and_read() -> Result<(), PirError> {
-        // Initialize with some test data
-        let item_size = 64;
-        let table_size = 10;
-        
         let key1 = Key::new_random();
         let key2 = Key::new_random();
 
-        // Create two servers with initial elements
-        let mut server1 = Server::new(table_size, item_size)?;
-        let mut server2 = Server::new(table_size, item_size)?;
+        let mut client1 = Client::new("client1".to_string(), TABLE_SIZE as i32)?;
+        let mut client2 = Client::new("client2".to_string(), TABLE_SIZE as i32)?;
 
-        // Create client
-        let client = Client::new(table_size as i32, key1.to_vec(), key2.to_vec())?;
+        // Create two servers with initial elements
+        let mut server1 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+        let mut server2 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+
+        client1.add_key("client2".to_string(), key1.clone(), key2.clone())?;
+        client2.add_key("client1".to_string(), key1.clone(), key2.clone())?;
 
         // Create new element and write it
         let new_element = {
-            let mut data = vec![0u8; item_size];
-            for i in 0..item_size {
+            let mut data = vec![0u8; ITEM_SIZE];
+            for i in 0..ITEM_SIZE {
                 data[i] = (i % 256) as u8;
             }
             data
@@ -40,7 +41,7 @@ mod test {
 
         // Convert to string and write to servers
         let new_element_str = new_element.clone();
-        let (item, Request { request1, request2 }) = client.generate_requests(new_element.clone(), 0, 0)?;
+        let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), new_element.clone(), 0, 0)?;
 
         server1.write(item.clone())?;
         server2.write(item.clone())?;
@@ -49,7 +50,7 @@ mod test {
         let response2 = server2.get(&request2)?;
         
         // Process responses
-        let final_response = client.process_responses(Response {
+        let final_response = client1.process_responses(Response {
             response1,
             response2,
         })?;

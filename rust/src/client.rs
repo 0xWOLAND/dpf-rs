@@ -5,7 +5,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use cuckoo::{prf as cuckoo_prf, Item};
 use rand::{thread_rng, Rng};
 
-use crate::error::{PirError, PirStatus};
+use crate::{error::{PirError, PirStatus}, utils::Key};
+
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize)]
 pub struct Request {
@@ -40,14 +42,14 @@ extern "C" {
 }
 
 pub struct Client {
+    id: String,
     handle: *mut c_void,
     database_size: i32,
-    key1: Vec<u8>,
-    key2: Vec<u8>,
+    keys: HashMap<String, (Key, Key)>,
 }
 
 impl Client {
-    pub fn new(database_size: i32, key1: Vec<u8>, key2: Vec<u8>) -> Result<Self, PirError> {
+    pub fn new(id: String, database_size: i32) -> Result<Self, PirError> {
         if database_size <= 0 {
             return Err(PirError::InvalidArgument);
         }
@@ -55,7 +57,7 @@ impl Client {
         unsafe {
             let mut handle = ptr::null_mut();
             let result: Result<(), PirError> = pir_client_create(database_size, &mut handle).into();
-            result.map(|_| Self { handle, database_size, key1, key2 })
+            result.map(|_| Self { id, handle, database_size, keys: HashMap::new() })
         }
     }
 
@@ -64,7 +66,9 @@ impl Client {
             return Err(PirError::InvalidArgument);
         }
 
-        let new_client = Client::new(new_size, self.key1.clone(), self.key2.clone())?;
+        let keys = self.keys.clone();
+        let mut new_client = Client::new(self.id.clone(), new_size)?;
+        new_client.keys = keys;
         
         unsafe {
             if !self.handle.is_null() {
@@ -77,12 +81,19 @@ impl Client {
         Ok(())
     }
 
-    pub fn generate_requests(&self, element: Vec<u8>, index: u64, seq_no: u64) -> Result<(Item, Request), PirError> {
+    pub fn add_key(&mut self, to: String, key1: Key, key2: Key) -> Result<(), PirError> {
+        self.keys.insert(to, (key1, key2));
+        Ok(())
+    }
+
+    pub fn generate_requests(&self, to: String, element: Vec<u8>, index: u64, seq_no: u64) -> Result<(Item, Request), PirError> {
         let mut rng = thread_rng();
         let id = rng.gen::<u64>();
-
-        let bucket1 = cuckoo_prf(&self.key1, index).unwrap() % self.database_size as usize;
-        let bucket2 = cuckoo_prf(&self.key2, index).unwrap() % self.database_size as usize;
+        let key1 = self.keys.get(&to).unwrap().0.clone();
+        let key2 = self.keys.get(&to).unwrap().1.clone();
+        
+        let bucket1 = cuckoo_prf(key1.as_slice(), index).unwrap() % self.database_size as usize;
+        let bucket2 = cuckoo_prf(key2.as_slice(), index).unwrap() % self.database_size as usize;
         let item = Item::new(id, element, bucket1, bucket2);
         
         self._generate_requests(&[bucket1 as i32, bucket2 as i32]).map(|request| (item, request))
