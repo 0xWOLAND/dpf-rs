@@ -76,6 +76,8 @@ impl Table {
 
     pub fn insert(&mut self, item: &Item) -> Result<Option<Item>, Error> {
         if item.data.len() != self.item_size {
+            println!("item.data.len()={}", item.data.len());
+            println!("self.item_size={}", self.item_size);
             return Err(Error::InvalidInput);
         }
 

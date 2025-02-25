@@ -5,7 +5,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use cuckoo::{prf as cuckoo_prf, Item};
 use rand::{thread_rng, Rng};
 
-use crate::{error::{PirError, PirStatus}, utils::Key};
+use crate::{error::{PirError, PirStatus, CryptoError}, utils::{Key, kdf, encrypt, decrypt}, constants::PADDING_SIZE};
 
 use std::collections::HashMap;
 
@@ -45,7 +45,7 @@ pub struct Client {
     id: String,
     handle: *mut c_void,
     database_size: i32,
-    keys: HashMap<String, (Key, Key)>,
+    keys: HashMap<String, (Key, Key, Key)>,
 }
 
 impl Client {
@@ -81,10 +81,38 @@ impl Client {
         Ok(())
     }
 
-    pub fn add_key(&mut self, to: String, key1: Key, key2: Key) -> Result<(), PirError> {
-        self.keys.insert(to, (key1, key2));
+    pub fn add_key(&mut self, to: String, key: Key) -> Result<(), PirError> {
+        let key1 = kdf(&key, "key1").unwrap();
+        let key2 = kdf(&key, "key2").unwrap();
+        let k_enc = kdf(&key, "k_enc").unwrap();
+        
+        self.keys.insert(to, (key1, key2, k_enc));
+
         Ok(())
     }
+
+    pub fn encrypt(&self, to: String, element: Vec<u8>) -> Result<Vec<u8>, PirError> {
+        let k_enc = self.keys.get(&to).unwrap().2.clone();
+        let encrypted_element = encrypt(&k_enc, &element, PADDING_SIZE).unwrap();
+        Ok(encrypted_element)
+    }
+
+    pub fn decrypt(&self, to: String, response: Vec<Vec<u8>>) -> Result<Vec<u8>, PirError> {
+        let k_enc = self.keys.get(&to).unwrap().2.clone();
+        
+        for bucket in response {
+            for chunk in bucket.chunks(bucket.len() / 4) {
+                println!("chunk: {:?}", chunk);
+                if let Ok(decrypted_chunk) = decrypt(&k_enc, chunk) {
+                    return Ok(decrypted_chunk);
+                }
+            }
+        }
+        
+        println!("Decryption failed");
+        Err(PirError::Crypto(CryptoError::DecryptionFailed))
+    }
+
 
     pub fn generate_requests(&self, to: String, element: Vec<u8>, seq_no: u64) -> Result<(Item, Request), PirError> {
         let mut rng = thread_rng();

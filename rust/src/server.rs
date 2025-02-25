@@ -6,7 +6,7 @@ use std::ptr;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use crate::{
-    constants::{BUCKET_DEPTH, RANDOM_SEED},
+    constants::{BUCKET_DEPTH, RANDOM_SEED, PADDING_SIZE, NONCE_SIZE},
     error::{PirError, PirStatus},
 };
 
@@ -155,8 +155,8 @@ impl Server {
         let table = Table::new(
             capacity,
             BUCKET_DEPTH,
-            item_size,
-            Some(vec![0u8; capacity * BUCKET_DEPTH * item_size]),
+            item_size + PADDING_SIZE + NONCE_SIZE,
+            Some(vec![0u8; capacity * BUCKET_DEPTH * (item_size + PADDING_SIZE + NONCE_SIZE)]),
             RANDOM_SEED,
         )
         .ok_or(PirError::InvalidArgument)?;
