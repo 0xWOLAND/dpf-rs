@@ -1,9 +1,9 @@
 use libc::{c_char, c_int, c_void};
-use std::ffi::{CStr, CString};
-use std::ptr;
+use std::{ffi::{CStr, CString}, ptr};
 use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use cuckoo::prf;
+use cuckoo::{prf as cuckoo_prf, Item};
+use rand::{thread_rng, Rng};
 
 use crate::error::{PirError, PirStatus};
 
@@ -77,11 +77,15 @@ impl Client {
         Ok(())
     }
 
-    pub fn generate_requests(&self, index: u64) -> Result<Request, PirError> {
-        let bucket1 = (prf(&self.key1, index).unwrap() as i32) % self.database_size;
-        let bucket2 = (prf(&self.key2, index).unwrap() as i32) % self.database_size;
+    pub fn generate_requests(&self, element: Vec<u8>, index: u64, seq_no: u64) -> Result<(Item, Request), PirError> {
+        let mut rng = thread_rng();
+        let id = rng.gen::<u64>();
 
-        self._generate_requests(&[bucket1, bucket2])
+        let bucket1 = cuckoo_prf(&self.key1, index).unwrap() % self.database_size as usize;
+        let bucket2 = cuckoo_prf(&self.key2, index).unwrap() % self.database_size as usize;
+        let item = Item::new(id, element, bucket1, bucket2);
+        
+        self._generate_requests(&[bucket1 as i32, bucket2 as i32]).map(|request| (item, request))
     }
 
     pub fn _generate_requests(&self, indices: &[i32]) -> Result<Request, PirError> {

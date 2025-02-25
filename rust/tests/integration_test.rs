@@ -4,6 +4,7 @@ mod test {
     use dpf_rs::{
         client::{Client, Request, Response},
         server::{Server, PirServer},
+        utils::Key,
         PirError,
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
@@ -16,20 +17,16 @@ mod test {
         // Initialize with some test data
         let item_size = 64;
         let table_size = 10;
+        
+        let key1 = Key::new_random();
+        let key2 = Key::new_random();
+
         // Create two servers with initial elements
         let mut server1 = Server::new(table_size, item_size)?;
         let mut server2 = Server::new(table_size, item_size)?;
 
-        let s1_key1 = server1.key1();
-        let s1_key2 = server2.key2();
-        let s2_key1 = server2.key1();
-        let s2_key2 = server2.key2();
-
-        assert_eq!(s1_key1, s2_key1);
-        assert_eq!(s1_key2, s2_key2);
-        
         // Create client
-        let client = Client::new(table_size as i32, s1_key1.to_vec(), s1_key2.to_vec())?;
+        let client = Client::new(table_size as i32, key1.to_vec(), key2.to_vec())?;
 
         // Create new element and write it
         let new_element = {
@@ -43,16 +40,11 @@ mod test {
 
         // Convert to string and write to servers
         let new_element_str = new_element.clone();
-        server1.write(new_element_str.clone(), 0)?;
-        server2.write(new_element_str.clone(), 0)?;
+        let (item, Request { request1, request2 }) = client.generate_requests(new_element.clone(), 0, 0)?;
 
-        server1.write(new_element_str.clone(), 2)?;
-        server2.write(new_element_str.clone(), 2)?;
+        server1.write(item.clone())?;
+        server2.write(item.clone())?;
 
-        // Create PIR request for index 0
-        let Request { request1, request2 } = client.generate_requests(1)?;
-        
-        // Get responses from servers
         let response1 = server1.get(&request1)?;
         let response2 = server2.get(&request2)?;
         

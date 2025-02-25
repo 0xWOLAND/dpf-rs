@@ -1,7 +1,7 @@
 mod error;
 pub mod types;
 mod constants;
-mod utils;
+pub mod utils;
 pub mod client;
 pub mod server;
 

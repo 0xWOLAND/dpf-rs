@@ -3,7 +3,26 @@ use ring::{digest, hkdf, hmac};
 use aes_gcm::aead::{AeadInPlace, KeyInit};
 use aes_gcm::{Aes128Gcm, Nonce};
 use crate::error::CryptoError;
-use rand::Rng;
+use rand::{Rng, thread_rng};
+
+pub struct Key(Vec<u8>);
+
+impl Key {
+    pub fn new_random() -> Self {
+        let mut rng = rand::thread_rng();
+        let mut key = [0u8; 16];
+        rng.fill(&mut key);
+        Key(key.to_vec())
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.clone()
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// A custom KeyType that tells Ring's HKDF to produce a 16-byte output.
 struct Key16;
