@@ -1,8 +1,8 @@
 #include "server.h"
-#include "pir/private_information_retrieval.pb.h"
-#include "pir/prng/aes_128_ctr_seeded_prng.h"
-#include "pir/dense_dpf_pir_database.h"
-#include "pir/dense_dpf_pir_server.h"
+#include "external/distributed_point_functions/pir/private_information_retrieval.pb.h"
+#include "external/distributed_point_functions/pir/prng/aes_128_ctr_seeded_prng.h"
+#include "external/distributed_point_functions/pir/dense_dpf_pir_database.h"
+#include "external/distributed_point_functions/pir/dense_dpf_pir_server.h"
 #include "base64_utils.h"
 
 #include <memory>

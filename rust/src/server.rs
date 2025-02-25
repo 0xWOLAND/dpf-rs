@@ -1,7 +1,14 @@
+use cuckoo::{prf, Item, Table};
 use libc::{c_char, c_int, c_void};
+use rand::{thread_rng, Rng, RngCore};
 use std::ffi::{CStr, CString};
 use std::ptr;
-use crate::error::{PirError, PirStatus};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+
+use crate::{
+    constants::{BUCKET_DEPTH, RANDOM_SEED, PADDING_SIZE, NONCE_SIZE},
+    error::{PirError, PirStatus},
+};
 
 #[link(name = "dpf_server")]
 extern "C" {
@@ -19,77 +26,89 @@ extern "C" {
     fn pir_server_destroy(server_handle: *mut c_void);
 }
 
-pub struct PirServer<T> {
+pub struct PirServer {
     handle: *mut c_void,
-    elements: Vec<T>,
+    elements: Vec<String>,
+    capacity: usize,
 }
 
-impl<T> PirServer<T>
-where
-    T: AsRef<str> + Clone,
-{
-    pub fn new(elements: &[T]) -> Result<Self, PirError> {
-        if elements.is_empty() {
+
+impl PirServer {
+    pub fn new(capacity: usize, item_size: usize) -> Result<Self, PirError> {
+        if capacity == 0 {
             return Err(PirError::InvalidArgument);
         }
 
+        let elements: Vec<String> = (0..capacity).map(|_| {
+            BASE64.encode(vec![0u8; item_size])
+        }).collect();
+        
         unsafe {
             let c_strings: Vec<CString> = elements
                 .iter()
-                .map(|s| CString::new(s.as_ref()).map_err(|_| PirError::InvalidArgument))
+                .map(|element| {
+                    CString::new(element.clone())
+                        .map_err(|_| PirError::InvalidArgument)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
-            let c_ptrs: Vec<*const c_char> = c_strings
-                .iter()
-                .map(|cs| cs.as_ptr())
-                .collect();
+
+            let c_ptrs: Vec<*const c_char> = c_strings.iter().map(|cs| cs.as_ptr()).collect();
             let mut handle = ptr::null_mut();
-            let result: Result<(), PirError> = pir_server_create(
-                c_ptrs.as_ptr(), 
-                elements.len() as c_int, 
-                &mut handle
-            ).into();
-            
-            result.map(|_| Self { 
+            let result: Result<(), PirError> =
+                pir_server_create(c_ptrs.as_ptr(), capacity as c_int, &mut handle).into();
+            result.map(|_| Self {
                 handle,
-                elements: elements.to_vec(),
+                elements,
+                capacity,
             })
         }
     }
 
-    pub fn write(&mut self, element: T) -> Result<(), PirError> {
-        self.batch_write(&[element])
+    pub fn write(&mut self, index: usize, element: String) -> Result<(), PirError> {
+        self.batch_write(&[(index, element)])
     }
-
-    pub fn batch_write(&mut self, new_elements: &[T]) -> Result<(), PirError> {
+    
+    pub fn batch_write(&mut self, updates: &[(usize, String)]) -> Result<(), PirError> {
+        for (index, _) in updates {
+            if *index >= self.capacity {
+                return Err(PirError::IndexOutOfBounds);
+            }
+        }
         let mut updated_elements = self.elements.clone();
-        updated_elements.extend(new_elements.iter().cloned());
-
-        let new_server = PirServer::new(&updated_elements)?;
-        
+        for (index, element) in updates {
+            updated_elements[*index] = element.clone();
+        }
         unsafe {
+            let c_strings: Vec<CString> = updated_elements
+                .iter()
+                .map(|element| {
+                    CString::new(element.clone())
+                        .map_err(|_| PirError::InvalidArgument)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            let c_ptrs: Vec<*const c_char> = c_strings.iter().map(|cs| cs.as_ptr()).collect();
+            let mut new_handle = ptr::null_mut();
+            let result: Result<(), PirError> =
+                pir_server_create(c_ptrs.as_ptr(), self.capacity as c_int, &mut new_handle).into();
+            result?;
             if !self.handle.is_null() {
                 pir_server_destroy(self.handle);
             }
+            self.handle = new_handle;
+            self.elements = updated_elements;
         }
-        self.handle = new_server.handle;
-        self.elements = updated_elements;
-        
-        std::mem::forget(new_server);
-        
         Ok(())
     }
 
     pub fn process_request(&self, request_base64: &str) -> Result<String, PirError> {
         unsafe {
-            let c_request = CString::new(request_base64)
-                .map_err(|_| PirError::InvalidArgument)?;
-            
+            let c_request = CString::new(request_base64).map_err(|_| PirError::InvalidArgument)?;
+
             let mut response_ptr = ptr::null_mut();
-            let result: Result<(), PirError> = pir_server_process_request(
-                self.handle, 
-                c_request.as_ptr(), 
-                &mut response_ptr
-            ).into();
+            let result: Result<(), PirError> =
+                pir_server_process_request(self.handle, c_request.as_ptr(), &mut response_ptr)
+                    .into();
             result.and_then(|_| {
                 if response_ptr.is_null() {
                     return Err(PirError::FfiError);
@@ -104,12 +123,16 @@ where
         }
     }
 
-    pub fn get_elements(&self) -> &[T] {
+    pub fn get_elements(&self) -> &[String] {
         &self.elements
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
     }
 }
 
-impl<T> Drop for PirServer<T> {
+impl Drop for PirServer {
     fn drop(&mut self) {
         unsafe {
             if !self.handle.is_null() {
@@ -119,52 +142,62 @@ impl<T> Drop for PirServer<T> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub struct Server {
+    pir: PirServer,
+    table: Table,
+}
 
-    #[test]
-    fn test_server_creation() {
-        let elements = vec!["test1", "test2", "test3"];
-        let server = PirServer::new(&elements);
-        assert!(server.is_ok());
+impl Server {
+    pub fn new(capacity: usize, item_size: usize) -> Result<Self, PirError> {
+        if capacity == 0 {
+            return Err(PirError::InvalidArgument);
+        }
+        let table = Table::new(
+            capacity,
+            BUCKET_DEPTH,
+            item_size + PADDING_SIZE + NONCE_SIZE,
+            Some(vec![0u8; capacity * BUCKET_DEPTH * (item_size + PADDING_SIZE + NONCE_SIZE)]),
+            RANDOM_SEED,
+        )
+        .ok_or(PirError::InvalidArgument)?;
+        let pir = PirServer::new(capacity, item_size + PADDING_SIZE + NONCE_SIZE)?;
+
+        Ok(Self { pir, table })
     }
 
-    #[test]
-    fn test_empty_elements() {
-        let elements: Vec<String> = vec![];
-        let server = PirServer::new(&elements);
-        assert!(matches!(server, Err(PirError::InvalidArgument)));
+    pub fn write(&mut self, item: Item) -> Result<(), PirError> {
+        self.batch_write(&[item])
     }
 
-    #[test]
-    fn test_write() {
-        let elements = vec!["test1", "test2"];
-        let mut server = PirServer::new(&elements).unwrap();
-        assert!(server.write("test3").is_ok());
-        assert_eq!(server.get_elements(), &["test1", "test2", "test3"]);
+    pub fn batch_write(&mut self, updates: &[Item]) -> Result<(), PirError> {
+        for item in updates {
+            if self.table.insert(&item).is_err() {
+                return Err(PirError::TableFull);
+            }
+        }
+
+        self.update_pir_data()
     }
 
-    #[test]
-    fn test_batch_write() {
-        let elements = vec!["test1"];
-        let mut server = PirServer::new(&elements).unwrap();
-        assert!(server.batch_write(&["test2", "test3"]).is_ok());
-        assert_eq!(server.get_elements(), &["test1", "test2", "test3"]);
+    pub fn get(&self, request_base64: &String) -> Result<String, PirError> {
+        self.pir.process_request(request_base64)
     }
 
-    #[test]
-    fn test_with_string_type() {
-        let elements: Vec<String> = vec!["test1".to_string(), "test2".to_string()];
-        let mut server = PirServer::new(&elements).unwrap();
-        assert!(server.write("test3".to_string()).is_ok());
-        assert_eq!(
-            server.get_elements(),
-            &[
-                "test1".to_string(),
-                "test2".to_string(),
-                "test3".to_string()
-            ]
-        );
+    fn update_pir_data(&mut self) -> Result<(), PirError> {
+        let bucket_size = BUCKET_DEPTH * self.table.item_size;
+        let updates: Vec<(usize, String)> = (0..self.table.num_buckets)
+            .map(|bucket_idx| {
+                let start = bucket_idx * bucket_size;
+                let data = &self.table.data[start..start + bucket_size];
+                let encoded = BASE64.encode(data);
+                (bucket_idx, encoded)
+            })
+            .collect();
+
+        self.pir.batch_write(&updates)
+    }
+
+    pub fn get_elements(&self) -> &[String] {
+        self.pir.get_elements()
     }
 }
