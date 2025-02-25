@@ -102,14 +102,12 @@ impl Client {
         
         for bucket in response {
             for chunk in bucket.chunks(bucket.len() / 4) {
-                println!("chunk: {:?}", chunk);
                 if let Ok(decrypted_chunk) = decrypt(&k_enc, chunk) {
                     return Ok(decrypted_chunk);
                 }
             }
         }
         
-        println!("Decryption failed");
         Err(PirError::Crypto(CryptoError::DecryptionFailed))
     }
 
