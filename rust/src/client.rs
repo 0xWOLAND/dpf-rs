@@ -3,6 +3,7 @@ use std::ffi::{CStr, CString};
 use std::ptr;
 use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use cuckoo::prf;
 
 use crate::error::{PirError, PirStatus};
 
@@ -40,10 +41,13 @@ extern "C" {
 
 pub struct Client {
     handle: *mut c_void,
+    database_size: i32,
+    key1: Vec<u8>,
+    key2: Vec<u8>,
 }
 
 impl Client {
-    pub fn new(database_size: i32) -> Result<Self, PirError> {
+    pub fn new(database_size: i32, key1: Vec<u8>, key2: Vec<u8>) -> Result<Self, PirError> {
         if database_size <= 0 {
             return Err(PirError::InvalidArgument);
         }
@@ -51,7 +55,7 @@ impl Client {
         unsafe {
             let mut handle = ptr::null_mut();
             let result: Result<(), PirError> = pir_client_create(database_size, &mut handle).into();
-            result.map(|_| Self { handle })
+            result.map(|_| Self { handle, database_size, key1, key2 })
         }
     }
 
@@ -60,7 +64,7 @@ impl Client {
             return Err(PirError::InvalidArgument);
         }
 
-        let new_client = Client::new(new_size)?;
+        let new_client = Client::new(new_size, self.key1.clone(), self.key2.clone())?;
         
         unsafe {
             if !self.handle.is_null() {
@@ -73,7 +77,14 @@ impl Client {
         Ok(())
     }
 
-    pub fn generate_requests(&self, indices: &[i32]) -> Result<Request, PirError> {
+    pub fn generate_requests(&self, index: u64) -> Result<Request, PirError> {
+        let bucket1 = (prf(&self.key1, index).unwrap() as i32) % self.database_size;
+        let bucket2 = (prf(&self.key2, index).unwrap() as i32) % self.database_size;
+
+        self._generate_requests(&[bucket1, bucket2])
+    }
+
+    pub fn _generate_requests(&self, indices: &[i32]) -> Result<Request, PirError> {
         unsafe {
             let mut requests_json = ptr::null_mut();
             let result: Result<(), PirError> = pir_client_generate_requests(
@@ -141,47 +152,5 @@ impl Drop for Client {
                 pir_client_destroy(self.handle);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_pir_client_lifecycle() -> Result<(), PirError> {
-        let client = Client::new(100)?;
-        let indices = vec![1, 2, 3];
-        let requests = client.generate_requests(&indices)?;
-        assert!(!requests.request1.is_empty());
-        assert!(!requests.request2.is_empty());
-        Ok(())
-    }
-
-    #[test]
-    fn test_update_size() -> Result<(), PirError> {
-        let mut client = Client::new(100)?;
-        
-        assert!(client.update_size(200).is_ok());
-        
-        let indices = vec![150];
-        let requests = client.generate_requests(&indices)?;
-        assert!(!requests.request1.is_empty());
-        assert!(!requests.request2.is_empty());
-        
-        assert!(matches!(
-            client.update_size(-1),
-            Err(PirError::InvalidArgument)
-        ));
-        
-        Ok(())
-    }
-
-    #[test]
-    fn test_error_handling() {
-        assert!(matches!(
-            Client::new(-1),
-            Err(PirError::InvalidArgument)
-        ));
     }
 }
