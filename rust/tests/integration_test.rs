@@ -7,6 +7,7 @@ mod test {
         PirError,
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use cuckoo::prf;
 
     const TEST_ITEM_SIZE: usize = 64;
 
@@ -220,16 +221,40 @@ mod test {
 
         // Convert to string and write to servers
         let new_element_str = new_element.clone();
-        server1.write(0, new_element_str.clone(), 1)?;
-        server2.write(0, new_element_str.clone(), 1)?;
+        server1.write(new_element_str.clone(), 0)?;
+        server2.write(new_element_str.clone(), 0)?;
+
+        let s1_bucket1 = prf(&server1.key1(), 0).unwrap() % server1.capacity();
+        let s1_bucket2 = prf(&server1.key2(), 0).unwrap() % server1.capacity();
+
+        let s2_bucket1 = prf(&server2.key1(), 0).unwrap() % server2.capacity();
+        let s2_bucket2 = prf(&server2.key2(), 0).unwrap() % server2.capacity();
+
+        println!("s1_bucket1: {:?}", s1_bucket1);
+        println!("s1_bucket2: {:?}", s1_bucket2);
+        println!("s2_bucket1: {:?}", s2_bucket1);
+        println!("s2_bucket2: {:?}", s2_bucket2);
+
+        println!("Server 1 elements: ");
+        for element in server1.get_elements() {
+            println!("element: {:?}", element);
+        }
+
+        println!("Server 2 elements: ");
+        for element in server2.get_elements() {
+            println!("element: {:?}", element);
+        }
+
+        assert!(s1_bucket1 == s2_bucket1);
+        assert!(s1_bucket2 == s2_bucket2);
 
         // Create PIR request for index 0
-        let Request { request1, request2 } = client.generate_requests(&[0])?;
+        let Request { request1, request2 } = client.generate_requests(&[s1_bucket1 as i32])?;
         
         // Get responses from servers
         let response1 = server1.get(&request1)?;
         let response2 = server2.get(&request2)?;
-
+        
         // Process responses
         let final_response = client.process_responses(Response {
             response1,
@@ -239,6 +264,8 @@ mod test {
         // Convert final response string back to bytes for comparison
         println!("final response: {:?}", final_response);
         println!("initial bytes: {:?}", new_element);
+
+        assert!(1 < 0);
 
         Ok(())
     }

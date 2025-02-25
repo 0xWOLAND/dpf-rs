@@ -132,6 +132,7 @@ impl Table {
         // Closure to search a given bucket for an item with the provided prf1 and prf2.
         let search_bucket = |bucket: usize| -> Option<Item> {
             let start_index = bucket * self.bucket_depth;
+            println!("start_index: {}", start_index);
             let end_index = start_index + self.bucket_depth;
             for i in start_index..end_index {
                 let slot = &self.index[i];

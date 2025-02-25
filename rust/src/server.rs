@@ -44,8 +44,8 @@ impl PirServer {
 
         let mut rng = thread_rng();
         let elements: Vec<String> = (0..capacity).map(|_| {
-            let mut data = vec![0u8; item_size];
-            rng.fill_bytes(&mut data);
+            let mut data = vec![20u8; item_size];
+            // rng.fill_bytes(&mut data);
             BASE64.encode(data)
         }).collect();
         
@@ -158,16 +158,11 @@ impl Server {
         if capacity == 0 {
             return Err(PirError::InvalidArgument);
         }
-
-        let mut rng = thread_rng();
-        let bytes = (0..(capacity * BUCKET_DEPTH * item_size)).map(|_| rng.gen::<u8>()).collect::<Vec<_>>();
-
-        // Initialize empty table with raw bytes
         let table = Table::new(
             capacity,
             BUCKET_DEPTH,
             item_size,
-            Some(bytes),
+            Some(vec![0u8; capacity * BUCKET_DEPTH * item_size]),
             RANDOM_SEED,
             TEST_KEY1.to_vec(),
             TEST_KEY2.to_vec(),
@@ -178,23 +173,13 @@ impl Server {
         Ok(Self { pir, table })
     }
 
-    pub fn write(&mut self, index: usize, element: Vec<u8>, seq_no: u64) -> Result<(), PirError> {
-        self.batch_write(&[(index, element, seq_no)])
+    pub fn write(&mut self, element: Vec<u8>, seq_no: u64) -> Result<(), PirError> {
+        self.batch_write(&[(element, seq_no)])
     }
 
-    pub fn batch_write(&mut self, updates: &[(usize, Vec<u8>, u64)]) -> Result<(), PirError> {
-        // Validate updates
-        for (index, element, seq_no) in updates {
-            if *index >= self.table.num_buckets {
-                return Err(PirError::IndexOutOfBounds);
-            }
-            if element.len() != self.table.item_size {
-                return Err(PirError::InvalidArgument);
-            }
-        }
-
+    pub fn batch_write(&mut self, updates: &[(Vec<u8>, u64)]) -> Result<(), PirError> {
         let mut rng = thread_rng();
-        for (index, element, seq_no) in updates {
+        for (element, seq_no) in updates {
             let bucket1 = prf(&self.table.key1, *seq_no).unwrap() % self.table.num_buckets;
             let bucket2 = prf(&self.table.key2, *seq_no).unwrap() % self.table.num_buckets;
             
@@ -232,10 +217,21 @@ impl Server {
 
         self.pir.batch_write(&updates)
     }
-    
+
+    pub fn get_elements(&self) -> &[String] {
+        self.pir.get_elements()
+    }
 
     pub fn capacity(&self) -> usize {
         self.pir.capacity()
+    }
+
+    pub fn key1(&self) -> &[u8] {
+        &self.table.key1
+    }
+
+    pub fn key2(&self) -> &[u8] {
+        &self.table.key2
     }
 }
 
@@ -286,53 +282,7 @@ mod tests {
 
         // Test writing valid element at valid index
         let new_element = create_test_data(TEST_ITEM_SIZE);
-        assert!(server.write(0, new_element, 1).is_ok());
-
-        // Test writing element with wrong size
-        let invalid_element = create_test_data(TEST_ITEM_SIZE - 1);
-        assert!(matches!(
-            server.write(0, invalid_element, 2),
-            Err(PirError::InvalidArgument)
-        ));
-
-        // Test writing at invalid index
-        let element = create_test_data(TEST_ITEM_SIZE);
-        assert!(matches!(
-            server.write(TEST_CAPACITY, element, 3),
-            Err(PirError::IndexOutOfBounds)
-        ));
-    }
-
-    #[test]
-    fn test_server_batch_write() {
-        let mut server = Server::new(TEST_CAPACITY, TEST_ITEM_SIZE).unwrap();
-
-        // Test valid batch write
-        let updates = vec![
-            (0, create_test_data(TEST_ITEM_SIZE), 1),
-            (2, create_test_data(TEST_ITEM_SIZE), 2),
-        ];
-        assert!(server.batch_write(&updates).is_ok());
-
-        // Test batch write with invalid index
-        let invalid_updates = vec![
-            (0, create_test_data(TEST_ITEM_SIZE), 3),
-            (TEST_CAPACITY, create_test_data(TEST_ITEM_SIZE), 4), // Invalid index
-        ];
-        assert!(matches!(
-            server.batch_write(&invalid_updates),
-            Err(PirError::IndexOutOfBounds)
-        ));
-
-        // Test batch write with invalid size
-        let invalid_updates = vec![
-            (0, create_test_data(TEST_ITEM_SIZE), 5),
-            (1, create_test_data(TEST_ITEM_SIZE - 1), 6), // Invalid size
-        ];
-        assert!(matches!(
-            server.batch_write(&invalid_updates),
-            Err(PirError::InvalidArgument)
-        ));
+        assert!(server.write(new_element, 1).is_ok());
     }
 
     #[test]
@@ -348,7 +298,7 @@ mod tests {
         ];
 
         for (i, pattern) in test_patterns.iter().enumerate() {
-            assert!(server.write(i, pattern.clone(), i as u64).is_ok());
+            assert!(server.write(pattern.clone(), i as u64).is_ok());
         }
     }
 
@@ -362,6 +312,6 @@ mod tests {
         data[TEST_ITEM_SIZE/2] = 0;  // Middle byte null
         data[TEST_ITEM_SIZE-1] = 0;  // Last byte null
         
-        assert!(server.write(0, data, 1).is_ok());
+        assert!(server.write(data, 1).is_ok());
     }
 }

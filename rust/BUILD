@@ -43,6 +43,7 @@ rust_test(
     edition = "2021",
     deps = [
         ":dpf-rs",
+        "//cuckoo:cuckoo",
         "@crates//:rand",
         "@crates//:base64",
     ],
