@@ -40,7 +40,8 @@ mod test {
 
         // Convert to string and write to servers
         let encrypted_element = client1.encrypt("client2".to_string(), new_element.clone())?;
-        let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), encrypted_element, 0)?;
+        let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), encrypted_element.clone(), 0)?;
+        let (item, Request { request1, request2 }) = client2.generate_requests("client1".to_string(), encrypted_element, 0)?;
 
         server1.write(item.clone())?;
         server2.write(item.clone())?;
@@ -49,15 +50,21 @@ mod test {
         let response2 = server2.get(&request2)?;
         
         // Process responses
-        let final_response = client1.process_responses(Response {
+        let client1_response = client1.process_responses(Response {
+            response1: response1.clone(),
+            response2: response2.clone(),
+        })?;
+
+        let client2_response = client2.process_responses(Response {
             response1,
             response2,
         })?;
 
-        let decrypted_element = client1.decrypt("client2".to_string(), final_response)?;
-        println!("decrypted_element: {:?}", decrypted_element);
-
-        assert!(1 < 0);
+        let decrypted_element1 = client1.decrypt("client2".to_string(), client1_response)?;
+        let decrypted_element2 = client2.decrypt("client1".to_string(), client2_response)?;
+        
+        assert_eq!(decrypted_element1, new_element);
+        assert_eq!(decrypted_element2, new_element);
 
         Ok(())
     }
