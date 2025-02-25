@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod test {
     use rand::{Rng, thread_rng, RngCore};
-    use dpf_rs::{
+    use talek::{
         client::{Client, Request, Response},
         server::{Server, PirServer},
         utils::Key,
