@@ -249,7 +249,7 @@ mod test {
         assert!(s1_bucket2 == s2_bucket2);
 
         // Create PIR request for index 0
-        let Request { request1, request2 } = client.generate_requests(&[s1_bucket1 as i32])?;
+        let Request { request1, request2 } = client.generate_requests(&[s1_bucket1 as i32, s1_bucket2 as i32])?;
         
         // Get responses from servers
         let response1 = server1.get(&request1)?;
