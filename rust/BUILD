@@ -4,7 +4,7 @@ load("@rules_rust//cargo:defs.bzl", "cargo_build_script")
 package(default_visibility = ["//visibility:public"])
 
 rust_library(
-    name = "dpf-rs",
+    name = "talek",
     srcs = [
         "src/lib.rs",
         "src/client.rs",
@@ -32,17 +32,17 @@ rust_library(
 )
 
 rust_test(
-    name = "dpf_unit_tests",
-    crate = ":dpf-rs",
+    name = "talek_unit_tests",
+    crate = ":talek",
     edition = "2021",
 )
 
 rust_test(
-    name = "dpf_integration_test",
+    name = "talek_integration_test",
     srcs = ["tests/integration_test.rs"],
     edition = "2021",
     deps = [
-        ":dpf-rs",
+        ":talek",
         "//cuckoo:cuckoo",
         "@crates//:rand",
         "@crates//:base64",
