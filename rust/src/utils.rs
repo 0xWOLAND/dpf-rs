@@ -2,8 +2,28 @@
 use ring::{digest, hkdf, hmac};
 use aes_gcm::aead::{AeadInPlace, KeyInit};
 use aes_gcm::{Aes128Gcm, Nonce};
-use crate::error::CryptoError;
-use rand::Rng;
+use rand::{Rng, thread_rng};
+use crate::{error::CryptoError, constants::NONCE_SIZE};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Key(Vec<u8>);
+
+impl Key {
+    pub fn new_random() -> Self {
+        let mut rng = rand::thread_rng();
+        let mut key = [0u8; 16];
+        rng.fill(&mut key);
+        Key(key.to_vec())
+    }
+
+    pub fn to_vec(&self) -> Vec<u8> {
+        self.0.clone()
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
+    }
+}
 
 /// A custom KeyType that tells Ring's HKDF to produce a 16-byte output.
 struct Key16;
@@ -25,9 +45,9 @@ impl hkdf::KeyType for Key16 {
 /// # Returns
 /// * `Ok(Vec<u8>)` - The derived 16-byte key
 /// * `Err(MycoError)` - If HKDF expansion or fill fails, or if the input key length is invalid
-pub fn kdf(key: &[u8], input: &str) -> Result<Vec<u8>, CryptoError> {
+pub fn kdf(key: &Key, input: &str) -> Result<Key, CryptoError> {
     // Enforce that the input key is exactly 16 bytes (128 bits).
-    if key.len() != 16 {
+    if key.as_slice().len() != 16 {
         return Err(CryptoError::InvalidKeyLength);
     }
 
@@ -35,7 +55,7 @@ pub fn kdf(key: &[u8], input: &str) -> Result<Vec<u8>, CryptoError> {
     let salt = digest::digest(&digest::SHA256, b"MC-OSAM-Salt");
 
     // Extract the pseudorandom key (PRK) using Ring's HKDF.
-    let prk = hkdf::Salt::new(hkdf::HKDF_SHA256, salt.as_ref()).extract(key);
+    let prk = hkdf::Salt::new(hkdf::HKDF_SHA256, salt.as_ref()).extract(key.as_slice());
 
     // Use the provided input (as bytes) as the HKDF "info" parameter.
     let info = [input.as_bytes()];
@@ -49,69 +69,7 @@ pub fn kdf(key: &[u8], input: &str) -> Result<Vec<u8>, CryptoError> {
     okm.fill(&mut result)
         .map_err(|_| CryptoError::HkdfFillFailed)?;
 
-    Ok(result.to_vec())
-}
-
-/// Alternative PRF using HMAC-SHA256 directly.
-///
-/// This version uses HMAC-SHA256 with the provided key (which can be 16 bytes)
-/// to produce 16 bytes of pseudorandom output (by truncating the 32-byte tag).
-///
-/// # Arguments
-/// * `key` - The input key bytes (can be 16 bytes or another acceptable length)
-/// * `input` - Input bytes to mix into the PRF
-///
-/// # Returns
-/// * `Ok(Vec<u8>)` - 16 bytes of pseudorandom output
-/// * `Err(MycoError)` - In case of an error (though HMAC typically does not fail)
-pub fn _prf(key: &[u8], input: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    let signing_key = hmac::Key::new(hmac::HMAC_SHA256, key);
-    let tag = hmac::sign(&signing_key, input);
-    // Truncate the 32-byte tag to 16 bytes.
-    Ok(tag.as_ref()[..16].to_vec())
-}
-
-/// Wrapper for the PRF function that returns a fixed number of bytes.
-///
-/// This function calls the internal `_prf` function (which uses HMAC-SHA256 to produce a 16-byte output)
-/// and returns the first `length` bytes of the output.
-///
-/// # Arguments
-/// * `key` - The 128-bit key (16 bytes)
-/// * `input` - Input bytes to mix into the PRF
-/// * `length` - The number of bytes to return from the PRF output
-///
-/// # Returns
-/// * `Ok(Vec<u8>)` - A byte array containing the first `length` bytes of the PRF output.
-/// * `Err(MycoError)` - If the underlying PRF call fails.
-///
-pub fn prf(key: &[u8], input: &[u8], _max_value: usize) -> Result<Vec<u8>, CryptoError> {
-    // Call the underlying PRF function to get 16 bytes (128 bits) of pseudorandom output.
-    let prf_output = _prf(key, input)?;
-    
-    Ok(prf_output)
-}
-
-/// A wrapper around the PRF function that returns a fixed number of bytes.
-///
-/// This function calls the internal `_prf` function (which uses HMAC-SHA256 to produce a 16-byte output)
-/// and returns the first `length` bytes of the output.
-///
-/// # Arguments
-/// * `key` - The 128-bit key (16 bytes)
-/// * `input` - Input bytes to mix into the PRF
-/// * `length` - The number of bytes to return from the PRF output
-///
-/// # Returns
-/// * `Ok(Vec<u8>)` - A byte array containing the first `length` bytes of the PRF output.
-/// * `Err(MycoError)` - If the underlying PRF call fails.
-///
-pub fn prf_fixed_length(key: &[u8], input: &[u8], length: usize) -> Result<Vec<u8>, CryptoError> {
-    // Call the underlying PRF function to get 16 bytes (128 bits) of pseudorandom output.
-    let prf_output = _prf(key, input)?;
-    
-    // Return the first `length` bytes
-    Ok(prf_output[..length].to_vec())
+    Ok(Key(result.to_vec()))
 }
 
 fn pad_message(message: &[u8], target_length: usize) -> Vec<u8> {
@@ -132,10 +90,10 @@ fn pad_message(message: &[u8], target_length: usize) -> Vec<u8> {
 ///
 /// # Returns
 /// The encrypted message as a byte vector, or an error if encryption fails.
-pub fn encrypt(key: &[u8], message: &[u8], padding_size: usize) -> Result<Vec<u8>, CryptoError> {
-    let cipher = Aes128Gcm::new_from_slice(key)
+pub fn encrypt(key: &Key, message: &[u8], padding_size: usize) -> Result<Vec<u8>, CryptoError> {
+    let cipher = Aes128Gcm::new_from_slice(key.as_slice())
         .map_err(|_| CryptoError::EncryptionFailed)?;
-    let nonce_bytes = rand::thread_rng().gen::<[u8; 12]>();
+    let nonce_bytes = rand::thread_rng().gen::<[u8; NONCE_SIZE]>();
     let nonce = Nonce::from_slice(&nonce_bytes);
     let mut buffer = pad_message(message, padding_size);
     cipher
@@ -152,11 +110,11 @@ pub fn encrypt(key: &[u8], message: &[u8], padding_size: usize) -> Result<Vec<u8
 ///
 /// # Returns
 /// The decrypted message as a byte vector, or an error if decryption fails.
-pub fn decrypt(key: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+pub fn decrypt(key: &Key, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
     if ciphertext.len() < 12 {
         return Err(CryptoError::DecryptionFailed);
     }
-    let cipher = Aes128Gcm::new_from_slice(key)
+    let cipher = Aes128Gcm::new_from_slice(key.as_slice())
         .map_err(|_| CryptoError::DecryptionFailed)?;
     let (nonce, ciphertext) = ciphertext.split_at(12);
     let nonce = Nonce::from_slice(nonce);

@@ -6,12 +6,9 @@ use std::ptr;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 
 use crate::{
-    constants::{BUCKET_DEPTH, RANDOM_SEED},
+    constants::{BUCKET_DEPTH, RANDOM_SEED, PADDING_SIZE, NONCE_SIZE},
     error::{PirError, PirStatus},
 };
-
-const TEST_KEY1: [u8; 32] = [1u8; 32]; // Example key, adjust as needed
-const TEST_KEY2: [u8; 32] = [2u8; 32]; // Example key, adjust as needed
 
 #[link(name = "dpf_server")]
 extern "C" {
@@ -42,11 +39,8 @@ impl PirServer {
             return Err(PirError::InvalidArgument);
         }
 
-        let mut rng = thread_rng();
         let elements: Vec<String> = (0..capacity).map(|_| {
-            let mut data = vec![20u8; item_size];
-            // rng.fill_bytes(&mut data);
-            BASE64.encode(data)
+            BASE64.encode(vec![0u8; item_size])
         }).collect();
         
         unsafe {
@@ -161,11 +155,9 @@ impl Server {
         let table = Table::new(
             capacity,
             BUCKET_DEPTH,
-            item_size,
-            Some(vec![0u8; capacity * BUCKET_DEPTH * item_size]),
+            item_size + PADDING_SIZE + NONCE_SIZE,
+            Some(vec![0u8; capacity * BUCKET_DEPTH * (item_size + PADDING_SIZE + NONCE_SIZE)]),
             RANDOM_SEED,
-            TEST_KEY1.to_vec(),
-            TEST_KEY2.to_vec(),
         )
         .ok_or(PirError::InvalidArgument)?;
         let pir = PirServer::new(capacity, item_size)?;
@@ -173,23 +165,12 @@ impl Server {
         Ok(Self { pir, table })
     }
 
-    pub fn write(&mut self, element: Vec<u8>, seq_no: u64) -> Result<(), PirError> {
-        self.batch_write(&[(element, seq_no)])
+    pub fn write(&mut self, item: Item) -> Result<(), PirError> {
+        self.batch_write(&[item])
     }
 
-    pub fn batch_write(&mut self, updates: &[(Vec<u8>, u64)]) -> Result<(), PirError> {
-        let mut rng = thread_rng();
-        for (element, seq_no) in updates {
-            let bucket1 = prf(&self.table.key1, *seq_no).unwrap() % self.table.num_buckets;
-            let bucket2 = prf(&self.table.key2, *seq_no).unwrap() % self.table.num_buckets;
-            
-            let item = Item::new(
-                rng.gen::<u64>(),
-                element.clone(),
-                *seq_no,
-                bucket1,
-                bucket2
-            );
+    pub fn batch_write(&mut self, updates: &[Item]) -> Result<(), PirError> {
+        for item in updates {
             if self.table.insert(&item).is_err() {
                 return Err(PirError::TableFull);
             }
@@ -205,7 +186,6 @@ impl Server {
     fn update_pir_data(&mut self) -> Result<(), PirError> {
         let bucket_size = BUCKET_DEPTH * self.table.item_size;
         
-        // Each update contains the entire bucket's data
         let updates: Vec<(usize, String)> = (0..self.table.num_buckets)
             .map(|bucket_idx| {
                 let start = bucket_idx * bucket_size;
@@ -220,98 +200,5 @@ impl Server {
 
     pub fn get_elements(&self) -> &[String] {
         self.pir.get_elements()
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.pir.capacity()
-    }
-
-    pub fn key1(&self) -> &[u8] {
-        &self.table.key1
-    }
-
-    pub fn key2(&self) -> &[u8] {
-        &self.table.key2
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use rand::RngCore;
-
-    const TEST_ITEM_SIZE: usize = 64;
-    const TEST_CAPACITY: usize = 4;
-
-    fn create_test_data(size: usize) -> Vec<u8> {
-        let mut data = vec![0u8; size];
-        thread_rng().fill_bytes(&mut data);
-        data
-    }
-
-    #[test]
-    fn test_pir_server_creation() {
-        let capacity = 3;
-        let server = PirServer::new(capacity, TEST_ITEM_SIZE);
-        assert!(server.is_ok());
-        if let Ok(server) = server {
-            assert_eq!(server.capacity(), capacity);
-            assert_eq!(server.get_elements().len(), capacity);
-        }
-        let server = PirServer::new(0, TEST_ITEM_SIZE);
-        assert!(matches!(server, Err(PirError::InvalidArgument)));
-    }
-
-    #[test]
-    fn test_server_creation() {
-        // Test valid creation
-        let server = Server::new(TEST_CAPACITY, TEST_ITEM_SIZE);
-        assert!(server.is_ok());
-        if let Ok(server) = server {
-            assert_eq!(server.capacity(), TEST_CAPACITY);
-        }
-
-        // Test creation with zero capacity
-        let server = Server::new(0, TEST_ITEM_SIZE);
-        assert!(matches!(server, Err(PirError::InvalidArgument)));
-    }
-
-    #[test]
-    fn test_server_write() {
-        let mut server = Server::new(TEST_CAPACITY, TEST_ITEM_SIZE).unwrap();
-
-        // Test writing valid element at valid index
-        let new_element = create_test_data(TEST_ITEM_SIZE);
-        assert!(server.write(new_element, 1).is_ok());
-    }
-
-    #[test]
-    fn test_byte_data_preservation() {
-        let mut server = Server::new(TEST_CAPACITY, TEST_ITEM_SIZE).unwrap();
-        
-        // Test with specific byte patterns
-        let test_patterns = vec![
-            vec![0u8; TEST_ITEM_SIZE],                    // All zeros
-            vec![255u8; TEST_ITEM_SIZE],                  // All max bytes
-            (0..TEST_ITEM_SIZE as u8).collect(),          // Sequential bytes
-            create_test_data(TEST_ITEM_SIZE),             // Random bytes
-        ];
-
-        for (i, pattern) in test_patterns.iter().enumerate() {
-            assert!(server.write(pattern.clone(), i as u64).is_ok());
-        }
-    }
-
-    #[test]
-    fn test_null_byte_handling() {
-        let mut server = Server::new(TEST_CAPACITY, TEST_ITEM_SIZE).unwrap();
-        
-        // Create test data with explicit null bytes
-        let mut data = vec![1u8; TEST_ITEM_SIZE];
-        data[0] = 0;  // First byte null
-        data[TEST_ITEM_SIZE/2] = 0;  // Middle byte null
-        data[TEST_ITEM_SIZE-1] = 0;  // Last byte null
-        
-        assert!(server.write(data, 1).is_ok());
     }
 }

@@ -4,266 +4,58 @@ mod test {
     use dpf_rs::{
         client::{Client, Request, Response},
         server::{Server, PirServer},
+        utils::Key,
         PirError,
     };
     use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
     use cuckoo::prf;
 
     const TEST_ITEM_SIZE: usize = 64;
+    const ITEM_SIZE: usize = 64;
+    const TABLE_SIZE: usize = 10;
 
-    fn setup_servers(capacity: usize) -> (Client, PirServer, PirServer) {
-        let client = Client::new(capacity as i32).unwrap();
-        let mut server1 = PirServer::new(capacity, TEST_ITEM_SIZE).unwrap();
-        let mut server2 = PirServer::new(capacity, TEST_ITEM_SIZE).unwrap();
-
-        let elements: Vec<(usize, String)> = (0..capacity)
-            .map(|i| (i, format!("Element{}", i)))
-            .collect();
-        server1.batch_write(&elements).unwrap();
-        server2.batch_write(&elements).unwrap();
-
-        (client, server1, server2)
-    }
-
-    #[test]
-    fn test_single_element_query() -> Result<(), PirError> {
-        let (client, server1, server2) = setup_servers(4);
-        
-        let indices = vec![1];
-        let Request { request1, request2 } = client.generate_requests(&indices)?;
-        
-        assert!(!request1.is_empty());
-        assert!(!request2.is_empty());
-        
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        
-        assert!(!response1.is_empty());
-        assert!(!response2.is_empty());
-        
-        let final_response = client._process_responses(Response { 
-            response1, 
-            response2 
-        })?;
-        
-        assert_eq!(final_response, "Element1");
-        Ok(())
-    }
-
-    #[test]
-    fn test_multi_element_query() -> Result<(), PirError> {
-        let (client, server1, server2) = setup_servers(4);
-        
-        let indices = vec![0, 2];
-        let Request { request1, request2 } = client.generate_requests(&indices)?;
-        
-        assert!(!request1.is_empty());
-        assert!(!request2.is_empty());
-        
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        
-        assert!(!response1.is_empty());
-        assert!(!response2.is_empty());
-        
-        let final_response = client._process_responses(Response { 
-            response1, 
-            response2 
-        })?;
-        
-        assert_eq!(final_response, "Element0, Element2");
-        Ok(())
-    }
-
-    #[test]
-    fn test_server_write() -> Result<(), PirError> {
-        let (client, mut server1, mut server2) = setup_servers(5);
-
-        // Write a new element at index 4
-        server1.write(4, "NewElement".to_string())?;
-        server2.write(4, "NewElement".to_string())?;
-
-        // Query for the newly written element
-        let Request { request1, request2 } = client.generate_requests(&[4])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let final_response = client._process_responses(Response { response1, response2 })?;
-        
-        assert_eq!(final_response, "NewElement");
-        assert_eq!(server1.get_elements().len(), 5);
-        assert_eq!(server2.get_elements().len(), 5);
-        Ok(())
-    }
-
-    #[test]
-    fn test_server_batch_write() -> Result<(), PirError> {
-        let (client, mut server1, mut server2) = setup_servers(6);
-
-        // Write multiple elements at specific indices
-        let updates = vec![
-            (4, "NewElement1".to_string()),
-            (5, "NewElement2".to_string())
-        ];
-        server1.batch_write(&updates)?;
-        server2.batch_write(&updates)?;
-
-        // Query for both newly written elements
-        let indices = vec![4, 5];
-        let Request { request1, request2 } = client.generate_requests(&indices)?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let final_response = client._process_responses(Response { response1, response2 })?;
-        
-        assert_eq!(final_response, "NewElement1, NewElement2");
-        assert_eq!(server1.get_elements().len(), 6);
-        assert_eq!(server2.get_elements().len(), 6);
-        Ok(())
-    }
-
-    #[test]
-    fn test_write_then_query() -> Result<(), PirError> {
-        let (client, mut server1, mut server2) = setup_servers(5);
-
-        // First query original element
-        let Request { request1, request2 } = client.generate_requests(&[1])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let initial_response = client._process_responses(Response { response1, response2 })?;
-        assert_eq!(initial_response, "Element1");
-
-        // Write new element at index 4
-        server1.write(4, "NewElement".to_string())?;
-        server2.write(4, "NewElement".to_string())?;
-
-        let Request { request1, request2 } = client.generate_requests(&[4])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let final_response = client._process_responses(Response { response1, response2 })?;
-        assert_eq!(final_response, "NewElement");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_error_handling() {
-        // Test invalid capacity
-        assert!(matches!(
-            PirServer::new(0, TEST_ITEM_SIZE),
-            Err(PirError::InvalidArgument)
-        ));
-        
-        let (_, mut server1, _) = setup_servers(4);
-        
-        // Test out of bounds write
-        assert!(matches!(
-            server1.write(10, "OutOfBounds".to_string()),
-            Err(PirError::IndexOutOfBounds)
-        ));
-        
-        // Test out of bounds batch write
-        assert!(matches!(
-            server1.batch_write(&[(5, "OutOfBounds".to_string())]),
-            Err(PirError::IndexOutOfBounds)
-        ));
-
-        // Test client error cases
-        assert!(matches!(
-            Client::new(-1),
-            Err(PirError::InvalidArgument)
-        ));
-        
-        let client = Client::new(4).unwrap();
-        let out_of_bounds = vec![10];
-        assert!(matches!(
-            client.generate_requests(&out_of_bounds),
-            Err(PirError::InvalidArgument)
-        ));
-    }
-    
     #[test]
     fn test_server_write_and_read() -> Result<(), PirError> {
-        // Initialize with some test data
-        let item_size = 64;
-        let initial_elements: Vec<Vec<u8>> = (0..4)
-            .map(|_| {
-                let mut data = vec![b'a'; item_size];
-                // thread_rng().fill_bytes(&mut data);
-                data
-            })
-            .collect();
+        let key = Key::new_random();
 
-        // Store the initial element at index 0 for comparison
-        let initial_element_0 = initial_elements[0].clone();
-
-        // Convert initial elements to strings for the server
-        let initial_strings: Vec<String> = initial_elements
-            .iter()
-            .map(|bytes| String::from_utf8_lossy(bytes).to_string())
-            .collect();
+        let mut client1 = Client::new("client1".to_string(), TABLE_SIZE as i32)?;
+        let mut client2 = Client::new("client2".to_string(), TABLE_SIZE as i32)?;
 
         // Create two servers with initial elements
-        let mut server1 = Server::new(4, item_size)?;
-        let mut server2 = Server::new(4, item_size)?;
-        
-        // Create client
-        let client = Client::new(initial_elements.len() as i32)?;
+        let mut server1 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+        let mut server2 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+
+        client1.add_key("client2".to_string(), key.clone())?;
+        client2.add_key("client1".to_string(), key.clone())?;
 
         // Create new element and write it
         let new_element = {
-            let mut data = vec![0u8; item_size];
-            for i in 0..item_size {
-                // data[i] = (i % 256) as u8;
-                data[i] = b'a';
+            let mut data = vec![0u8; ITEM_SIZE];
+            for i in 0..ITEM_SIZE {
+                data[i] = (i % 256) as u8;
             }
             data
         };
 
 
         // Convert to string and write to servers
-        let new_element_str = new_element.clone();
-        server1.write(new_element_str.clone(), 0)?;
-        server2.write(new_element_str.clone(), 0)?;
+        let encrypted_element = client1.encrypt("client2".to_string(), new_element.clone())?;
+        let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), encrypted_element, 0)?;
 
-        let s1_bucket1 = prf(&server1.key1(), 0).unwrap() % server1.capacity();
-        let s1_bucket2 = prf(&server1.key2(), 0).unwrap() % server1.capacity();
+        server1.write(item.clone())?;
+        server2.write(item.clone())?;
 
-        let s2_bucket1 = prf(&server2.key1(), 0).unwrap() % server2.capacity();
-        let s2_bucket2 = prf(&server2.key2(), 0).unwrap() % server2.capacity();
-
-        println!("s1_bucket1: {:?}", s1_bucket1);
-        println!("s1_bucket2: {:?}", s1_bucket2);
-        println!("s2_bucket1: {:?}", s2_bucket1);
-        println!("s2_bucket2: {:?}", s2_bucket2);
-
-        println!("Server 1 elements: ");
-        for element in server1.get_elements() {
-            println!("element: {:?}", element);
-        }
-
-        println!("Server 2 elements: ");
-        for element in server2.get_elements() {
-            println!("element: {:?}", element);
-        }
-
-        assert!(s1_bucket1 == s2_bucket1);
-        assert!(s1_bucket2 == s2_bucket2);
-
-        // Create PIR request for index 0
-        let Request { request1, request2 } = client.generate_requests(&[s1_bucket1 as i32, s1_bucket2 as i32])?;
-        
-        // Get responses from servers
         let response1 = server1.get(&request1)?;
         let response2 = server2.get(&request2)?;
         
         // Process responses
-        let final_response = client.process_responses(Response {
+        let final_response = client1.process_responses(Response {
             response1,
             response2,
         })?;
 
-        // Convert final response string back to bytes for comparison
-        println!("final response: {:?}", final_response);
-        println!("initial bytes: {:?}", new_element);
+        let decrypted_element = client1.decrypt("client2".to_string(), final_response)?;
+        println!("decrypted_element: {:?}", decrypted_element);
 
         assert!(1 < 0);
 

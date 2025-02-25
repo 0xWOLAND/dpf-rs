@@ -20,7 +20,6 @@ pub fn prf(key: &[u8], seq_no: u64) -> Result<usize, Error> {
 pub struct Item {
     pub id: u64,
     pub data: Vec<u8>,
-    pub seq_no: u64,
     pub bucket1: usize,
     pub bucket2: usize,
 }
@@ -31,7 +30,6 @@ pub struct ItemLocation {
     filled: bool,
     bucket1: usize,
     bucket2: usize,
-    seq_no: u64,
 }
 
 #[derive(Error, Debug)]
@@ -51,8 +49,6 @@ pub struct Table {
     pub data: Vec<u8>,
     pub rng: StdRng,
     pub index: Vec<ItemLocation>,
-    pub key1: Vec<u8>,
-    pub key2: Vec<u8>,
 }
 
 impl Table {
@@ -62,8 +58,6 @@ impl Table {
         item_size: usize,
         data: Option<Vec<u8>>,
         rand_seed: u64,
-        key1: Vec<u8>,
-        key2: Vec<u8>,
     ) -> Option<Self> {
         let expected_size = num_buckets * bucket_depth * item_size;
         let data = data
@@ -77,27 +71,20 @@ impl Table {
             data,
             rng: StdRng::seed_from_u64(rand_seed),
             index: vec![ItemLocation::default(); num_buckets * bucket_depth],
-            key1,
-            key2,
         })
     }
 
     pub fn insert(&mut self, item: &Item) -> Result<Option<Item>, Error> {
         if item.data.len() != self.item_size {
-            return Err(Error::InvalidInput);
-        }
-
-        let bucket1 = prf(&self.key1, item.seq_no)? % self.num_buckets;
-        let bucket2 = prf(&self.key2, item.seq_no)? % self.num_buckets;
-
-        if bucket1 != item.bucket1 || bucket2 != item.bucket2 {
+            println!("item.data.len()={}", item.data.len());
+            println!("self.item_size={}", self.item_size);
             return Err(Error::InvalidInput);
         }
 
         let (first_bucket, other_bucket) = if self.rng.gen_bool(0.5) {
-            (bucket1, bucket2)
+            (item.bucket1, item.bucket2)
         } else {
-            (bucket2, bucket1)
+            (item.bucket2, item.bucket1)
         };
 
         if self.try_insert_to_bucket(first_bucket, item) {
@@ -159,7 +146,6 @@ impl Table {
                     filled: true,
                     bucket1: item.bucket1,
                     bucket2: item.bucket2,
-                    seq_no: item.seq_no,
                 };
                 return true;
             }
@@ -201,17 +187,15 @@ impl Table {
             data: self.data[data_start..data_start + self.item_size].to_vec(),
             bucket1: self.index[item_index].bucket1,
             bucket2: self.index[item_index].bucket2,
-            seq_no: self.index[item_index].seq_no,
         })
     }
 }
 
 impl Item {
-    pub fn new(id: u64, data: Vec<u8>, seq_no: u64, bucket1: usize, bucket2: usize) -> Self {
+    pub fn new(id: u64, data: Vec<u8>, bucket1: usize, bucket2: usize) -> Self {
         Self {
             id,
             data,
-            seq_no,
             bucket1,
             bucket2,
         }
@@ -246,16 +230,8 @@ mod tests {
             TEST_ITEM_SIZE,
             None,
             RANDOM_SEED,
-            TEST_KEY1.to_vec(),
-            TEST_KEY2.to_vec(),
         )
         .unwrap()
-    }
-
-    fn create_test_item(table: &Table, id: u64, data: Vec<u8>, seq_no: u64) -> Item {
-        let bucket1 = prf(TEST_KEY1, seq_no).unwrap() % table.num_buckets;
-        let bucket2 = prf(TEST_KEY2, seq_no).unwrap() % table.num_buckets;
-        Item::new(id, data, seq_no, bucket1, bucket2)
     }
 
     #[test]
@@ -276,29 +252,23 @@ mod tests {
         println!("table.data.len()={}", table.data.len());
         assert_eq!(0, table.index.iter().filter(|loc| loc.filled).count());
 
+        let seq_no = 0;
+        let bucket1 = prf(TEST_KEY1, seq_no).unwrap() % table.num_buckets;
+        let bucket2 = prf(TEST_KEY2, seq_no).unwrap() % table.num_buckets;
+
         // Test with invalid data size
-        let item = create_test_item(&table, 1, vec![0, 0], 0);
+        let item = Item::new(1, vec![0, 0], bucket1, bucket2);
         let result = table.insert(&item);
         assert!(result.is_err());
 
         // Test with valid data
-        let item = create_test_item(&table, 1, get_bytes("value1"), 0);
+        let item = Item::new(1, get_bytes("value1"), bucket1, bucket2);
         let result = table.insert(&item);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
 
         assert!(table.index.iter().any(|loc| loc.filled && loc.id == 1));
         assert_eq!(1, table.index.iter().filter(|loc| loc.filled).count());
-    }
-
-    #[test]
-    fn test_out_of_bounds() {
-        let mut table = create_test_table(10, 2);
-        
-        // Create item with invalid buckets (not matching PRF)
-        let item = Item::new(1, get_bytes("value1"), 0, 100, 100);
-        let result = table.insert(&item);
-        assert!(result.is_err());
     }
 
     #[test]
@@ -314,12 +284,15 @@ mod tests {
         let mut evicted = None;
         let mut seq_no = 0u64;
 
+        let bucket1 = prf(TEST_KEY1, seq_no).unwrap() % table.num_buckets;
+        let bucket2 = prf(TEST_KEY2, seq_no).unwrap() % table.num_buckets;
+
         loop {
             let id = rng.gen::<u64>();
             let val = get_bytes(&rng.gen::<u64>().to_string());
             
-            let item = create_test_item(&table, id, val, seq_no);
-            let empty_item = create_test_item(&table, id, vec![], seq_no);
+            let item = Item::new(id, val, bucket1, bucket2);
+            let empty_item = Item::new(id, vec![], bucket1, bucket2);
             entries.push(empty_item);
             seq_no += 1;
 
@@ -397,17 +370,21 @@ mod tests {
     fn test_duplicate_values() {
         let mut table = create_test_table(10, 2);
 
-        let item1 = create_test_item(&table, 1, get_bytes("v"), 0);
+        let seq_no = 0;
+        let bucket1 = prf(TEST_KEY1, seq_no).unwrap() % table.num_buckets;
+        let bucket2 = prf(TEST_KEY2, seq_no).unwrap() % table.num_buckets;
+
+        let item1 = Item::new(1, get_bytes("v"), bucket1, bucket2);
         let result = table.insert(&item1);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
 
-        let item2 = create_test_item(&table, 2, get_bytes("v"), 1);
+        let item2 = Item::new(2, get_bytes("v"), bucket1, bucket2);
         let result = table.insert(&item2);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
 
-        let item3 = create_test_item(&table, 3, get_bytes("v"), 2);
+        let item3 = Item::new(3, get_bytes("v"), bucket1, bucket2);
         let result = table.insert(&item3);
         assert!(result.is_ok());
         assert!(result.unwrap().is_none());
@@ -437,7 +414,9 @@ mod tests {
         let seq_no = 42;
         let id = 100;
         let data = get_bytes("test_value");
-        let item = create_test_item(&table, id, data, seq_no);
+        let bucket1 = prf(TEST_KEY1, seq_no).unwrap() % table.num_buckets;
+        let bucket2 = prf(TEST_KEY2, seq_no).unwrap() % table.num_buckets;
+        let item = Item::new(id, data, bucket1, bucket2);
 
         // Insert the item.
         let result = table.insert(&item);
@@ -445,7 +424,7 @@ mod tests {
         assert!(result.unwrap().is_none());
 
         // Now, retrieve the item using its two distinct PRF bucket indices.
-        let retrieved = table.get(item.bucket1, item.bucket2);
+        let retrieved = table.get(bucket1, bucket2);
         assert!(retrieved.is_some(), "Expected to retrieve the inserted item");
         let retrieved_item = retrieved.unwrap();
         assert_eq!(retrieved_item.id, item.id, "The retrieved item id does not match");

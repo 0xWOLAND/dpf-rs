@@ -25,6 +25,8 @@ pub enum PirError {
     TableFull,
     #[error("Index out of bounds")]
     IndexOutOfBounds,
+    #[error(transparent)] 
+    Crypto(#[from] CryptoError),
 }
 
 #[derive(Error, Debug)]
