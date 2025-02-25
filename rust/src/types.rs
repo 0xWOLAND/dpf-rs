@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use crate::constants::ITEM_SIZE;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Request {

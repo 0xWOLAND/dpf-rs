@@ -41,7 +41,7 @@ mod test {
 
         // Convert to string and write to servers
         let new_element_str = new_element.clone();
-        let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), new_element.clone(), 0, 0)?;
+        let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), new_element.clone(), 0)?;
 
         server1.write(item.clone())?;
         server2.write(item.clone())?;

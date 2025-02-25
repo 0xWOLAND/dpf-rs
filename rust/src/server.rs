@@ -40,8 +40,7 @@ impl PirServer {
         }
 
         let elements: Vec<String> = (0..capacity).map(|_| {
-            let mut data = vec![0u8; item_size];
-            BASE64.encode(data)
+            BASE64.encode(vec![0u8; item_size])
         }).collect();
         
         unsafe {

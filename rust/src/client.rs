@@ -86,14 +86,14 @@ impl Client {
         Ok(())
     }
 
-    pub fn generate_requests(&self, to: String, element: Vec<u8>, index: u64, seq_no: u64) -> Result<(Item, Request), PirError> {
+    pub fn generate_requests(&self, to: String, element: Vec<u8>, seq_no: u64) -> Result<(Item, Request), PirError> {
         let mut rng = thread_rng();
         let id = rng.gen::<u64>();
         let key1 = self.keys.get(&to).unwrap().0.clone();
         let key2 = self.keys.get(&to).unwrap().1.clone();
         
-        let bucket1 = cuckoo_prf(key1.as_slice(), index).unwrap() % self.database_size as usize;
-        let bucket2 = cuckoo_prf(key2.as_slice(), index).unwrap() % self.database_size as usize;
+        let bucket1 = cuckoo_prf(key1.as_slice(), seq_no).unwrap() % self.database_size as usize;
+        let bucket2 = cuckoo_prf(key2.as_slice(), seq_no).unwrap() % self.database_size as usize;
         let item = Item::new(id, element, bucket1, bucket2);
         
         self._generate_requests(&[bucket1 as i32, bucket2 as i32]).map(|request| (item, request))
