@@ -3,6 +3,7 @@ use rand::prelude::*;
 use sha2::Sha256;
 use thiserror::Error;
 
+// https://github.com/privacylab/talek/blob/57ac6aafbf14430146e49bc07009c841f5a020e7/cuckoo/table.go#L12
 const MAX_EVICTIONS: usize = 500;
 type HmacSha256 = Hmac<Sha256>;
 
