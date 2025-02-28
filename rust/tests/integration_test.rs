@@ -1,198 +1,116 @@
 #[cfg(test)]
 mod test {
+    use rand::{Rng, thread_rng, RngCore};
     use dpf_rs::{
-        client::{PirClient, Request, Response},
-        server::PirServer,
+        client::{Client, Request, Response},
+        server::{Server, PirServer},
+        utils::Key,
         PirError,
     };
+    use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+    use cuckoo::prf;
 
-    fn setup_servers(initial_elements: usize) -> (PirClient, PirServer<String>, PirServer<String>) {
-        let elements: Vec<String> = (0..initial_elements).map(|i| format!("Element{}", i)).collect();
-        let client = PirClient::new(elements.len() as i32).unwrap();
-        let server1 = PirServer::new(&elements).unwrap();
-        let server2 = PirServer::new(&elements).unwrap();
-        (client, server1, server2)
+    const TEST_ITEM_SIZE: usize = 64;
+    const ITEM_SIZE: usize = 64;
+    const TABLE_SIZE: usize = 4;
+
+    fn generate_random_data() -> Vec<u8> {
+        let mut rng = thread_rng();
+        let mut data = vec![0u8; ITEM_SIZE];
+        rng.fill_bytes(&mut data);
+        data
     }
 
     #[test]
-    fn test_single_element_query() -> Result<(), PirError> {
-        let elements: Vec<String> = (0..4).map(|i| format!("Element{}", i)).collect();
+    fn test_server_write_and_read() -> Result<(), PirError> {
+        let key = Key::new_random();
+
+        let mut client1 = Client::new("client1".to_string(), TABLE_SIZE as i32)?;
+        let mut client2 = Client::new("client2".to_string(), TABLE_SIZE as i32)?;
+
+        // Create two servers with initial elements
+        let mut server1 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+        let mut server2 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+
+        client1.add_key("client2".to_string(), key.clone())?;
+        client2.add_key("client1".to_string(), key.clone())?;
+
+        let new_element = generate_random_data();
+
+        // Convert to string and write to servers
+        let encrypted_element = client1.encrypt("client2".to_string(), new_element.clone())?;
+        let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), encrypted_element.clone(), 0)?;
+        let (item, Request { request1, request2 }) = client2.generate_requests("client1".to_string(), encrypted_element, 0)?;
+
+        server1.write(item.clone())?;
+        server2.write(item.clone())?;
+
+        let response1 = server1.get(&request1)?;
+        let response2 = server2.get(&request2)?;
         
-        let client = PirClient::new(elements.len() as i32)?;
-        let server1 = PirServer::new(&elements)?;
-        let server2 = PirServer::new(&elements)?;
-        
-        let indices = vec![1];
-        let Request { request1, request2 } = client.generate_requests(&indices)?;
-        
-        assert!(!request1.is_empty());
-        assert!(!request2.is_empty());
-        
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        
-        assert!(!response1.is_empty());
-        assert!(!response2.is_empty());
-        
-        let final_response = client.process_responses(Response { 
-            response1, 
-            response2 
+        // Process responses
+        let client1_response = client1.process_responses(Response {
+            response1: response1.clone(),
+            response2: response2.clone(),
         })?;
-        
-        assert_eq!(final_response, "Element1");
-        Ok(())
-    }
 
-    #[test]
-    fn test_multi_element_query() -> Result<(), PirError> {
-        let (client, server1, server2) = setup_servers(4);
-        
-        let indices = vec![0, 2];
-        let Request { request1, request2 } = client.generate_requests(&indices)?;
-        
-        assert!(!request1.is_empty());
-        assert!(!request2.is_empty());
-        
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        
-        assert!(!response1.is_empty());
-        assert!(!response2.is_empty());
-        
-        let final_response = client.process_responses(Response { 
-            response1, 
-            response2 
+        let client2_response = client2.process_responses(Response {
+            response1,
+            response2,
         })?;
+
+        let decrypted_element1 = client1.decrypt("client2".to_string(), client1_response)?;
+        let decrypted_element2 = client2.decrypt("client1".to_string(), client2_response)?;
         
-        assert_eq!(final_response, "Element0, Element2");
-        Ok(())
-    }
-
-    #[test]
-    fn test_server_write() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
-
-        // Update client size for the new element
-        client.update_size(5)?;
-
-        // Add a new element to both servers
-        server1.write("NewElement".to_string())?;
-        server2.write("NewElement".to_string())?;
-
-        // Query for the newly added element
-        let Request { request1, request2 } = client.generate_requests(&[4])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let final_response = client.process_responses(Response { response1, response2 })?;
-        
-        assert_eq!(final_response, "NewElement");
-        assert_eq!(server1.get_elements().len(), 5);
-        assert_eq!(server2.get_elements().len(), 5);
-        Ok(())
-    }
-
-    #[test]
-    fn test_server_batch_write() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
-
-        // Update client size for the new elements
-        client.update_size(6)?;
-
-        // Add multiple new elements to both servers
-        let new_elements = vec!["NewElement1".to_string(), "NewElement2".to_string()];
-        server1.batch_write(&new_elements)?;
-        server2.batch_write(&new_elements)?;
-
-        // Query for both newly added elements
-        let indices = vec![4, 5];
-        let Request { request1, request2 } = client.generate_requests(&indices)?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let final_response = client.process_responses(Response { response1, response2 })?;
-        
-        assert_eq!(final_response, "NewElement1, NewElement2");
-        assert_eq!(server1.get_elements().len(), 6);
-        assert_eq!(server2.get_elements().len(), 6);
-        Ok(())
-    }
-
-    #[test]
-    fn test_write_then_query() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
-
-        // First query original element
-        let Request { request1, request2 } = client.generate_requests(&[1])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let initial_response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(initial_response, "Element1");
-
-        // Update client size and write new element
-        client.update_size(5)?;
-        server1.write("NewElement".to_string())?;
-        server2.write("NewElement".to_string())?;
-
-        let Request { request1, request2 } = client.generate_requests(&[4])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let final_response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(final_response, "NewElement");
+        assert_eq!(decrypted_element1, new_element);
+        assert_eq!(decrypted_element2, new_element);
 
         Ok(())
     }
 
+
     #[test]
-    fn test_update_size() -> Result<(), PirError> {
-        let (mut client, mut server1, mut server2) = setup_servers(4);
-        
-        // Test that current size works
-        let Request { request1, request2 } = client.generate_requests(&[1])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(response, "Element1");
+    fn test_multiple_elements() -> Result<(), PirError> {
+        let key = Key::new_random();
 
-        // Update to larger size
-        client.update_size(8)?;
-        
-        // Write new elements
-        server1.write("NewElement1".to_string())?;
-        server2.write("NewElement1".to_string())?;
-        
-        // Test querying new index works
-        let Request { request1, request2 } = client.generate_requests(&[4])?;
-        let response1 = server1.process_request(&request1)?;
-        let response2 = server2.process_request(&request2)?;
-        let response = client.process_responses(Response { response1, response2 })?;
-        assert_eq!(response, "NewElement1");
+        let mut client1 = Client::new("client1".to_string(), TABLE_SIZE as i32)?;
+        let mut client2 = Client::new("client2".to_string(), TABLE_SIZE as i32)?;
 
-        // Test invalid size update
-        assert!(matches!(
-            client.update_size(-1),
-            Err(PirError::InvalidArgument)
-        ));
-        
+        client1.add_key("client2".to_string(), key.clone())?;
+        client2.add_key("client1".to_string(), key.clone())?;
+
+        let mut server1 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+        let mut server2 = Server::new(TABLE_SIZE, ITEM_SIZE)?;
+
+        const NUM_ELEMENTS: usize = 16;
+
+        for i in 0..NUM_ELEMENTS {
+            let new_element = generate_random_data();
+            let encrypted_element = client1.encrypt("client2".to_string(), new_element.clone())?;
+            let (item, Request { request1, request2 }) = client1.generate_requests("client2".to_string(), encrypted_element.clone(), i as u64)?;
+            
+            server1.write(item.clone())?;
+            server2.write(item.clone())?;
+
+            let response1 = server1.get(&request1)?;
+            let response2 = server2.get(&request2)?;
+
+            let client1_response = client1.process_responses(Response {
+                response1: response1.clone(),
+                response2: response2.clone(),
+            })?;
+
+            let client2_response = client2.process_responses(Response {
+                response1,
+                response2,
+            })?;
+
+            let decrypted_element1 = client1.decrypt("client2".to_string(), client1_response)?;
+            let decrypted_element2 = client2.decrypt("client1".to_string(), client2_response)?;
+
+            assert_eq!(decrypted_element1, decrypted_element2);
+        }
+
         Ok(())
-    }
-
-    #[test]
-    fn test_error_handling() {
-        assert!(matches!(
-            PirClient::new(-1),
-            Err(PirError::InvalidArgument)
-        ));
-        
-        let empty_elements: Vec<String> = vec![];
-        assert!(matches!(
-            PirServer::new(&empty_elements),
-            Err(PirError::InvalidArgument)
-        ));
-        
-        let client = PirClient::new(4).unwrap();
-        let out_of_bounds = vec![10];
-        assert!(matches!(
-            client.generate_requests(&out_of_bounds),
-            Err(PirError::InvalidArgument)
-        ));
     }
 }
